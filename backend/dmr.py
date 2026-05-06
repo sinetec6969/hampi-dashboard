@@ -13,7 +13,7 @@ DSD command line used:
 import asyncio
 import logging
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Callable, Awaitable, Optional
 
 logger = logging.getLogger(__name__)

@@ -13,7 +13,7 @@ export default function Controls({ onTune }: Props) {
       setFreq(d.freq); setGain(d.gain); setClients(d.clients||{})
       onTune(d.freq, d.gain)
     })
-  }, [])
+  }, [onTune])
 
   async function tune() {
     const r = await fetch(`/api/tune?freq=${freq}&gain=${gain}`, {method:'POST'})

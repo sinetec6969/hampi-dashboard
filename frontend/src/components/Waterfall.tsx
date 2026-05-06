@@ -44,6 +44,7 @@ export default function Waterfall({ centerFreqHz }: Props) {
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
     ws.onmessage = e => { rowBuf.current.push(new Float32Array(e.data)) }
+    ws.onerror = () => console.error('Waterfall WebSocket error')
 
     function frame() {
       if (!display) return

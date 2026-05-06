@@ -2,7 +2,6 @@
 sdr.py - SDR engine wrapping rtl_tcp for IQ acquisition, FFT, and FM demodulation.
 """
 
-import asyncio
 import logging
 import socket
 import struct

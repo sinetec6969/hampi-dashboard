@@ -10,7 +10,7 @@ export default function AudioPlayer() {
   const nextTimeRef = useRef(0)
 
   function start() {
-    const ctx = new AudioContext({ sampleRate: 8000 })
+    const ctx = new AudioContext({ sampleRate: 48000 })
     ctxRef.current = ctx
     nextTimeRef.current = ctx.currentTime + 0.2
 
@@ -21,11 +21,12 @@ export default function AudioPlayer() {
 
     ws.onopen = () => setStatus('streaming')
     ws.onclose = () => setStatus('stopped')
+    ws.onerror = () => setStatus('stopped')
     ws.onmessage = e => {
       const i16 = new Int16Array(e.data)
       const f32 = new Float32Array(i16.length)
       for (let i=0;i<i16.length;i++) f32[i]=i16[i]/32768
-      const buf = ctx.createBuffer(1, f32.length, 8000)
+      const buf = ctx.createBuffer(1, f32.length, 48000)
       buf.getChannelData(0).set(f32)
       const src = ctx.createBufferSource()
       src.buffer = buf
@@ -60,7 +61,7 @@ export default function AudioPlayer() {
           : <button className="btn stop" onClick={stop}>■ Stop</button>}
       </div>
       {underruns > 0 && <div className="status-line">Underruns: {underruns}</div>}
-      <div className="status-line" style={{marginTop:8}}>PCM 8kHz mono int16</div>
+      <div className="status-line" style={{marginTop:8}}>PCM 48kHz mono int16</div>
     </div>
   )
 }

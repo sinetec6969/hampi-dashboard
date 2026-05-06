@@ -18,7 +18,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Set
+from typing import Optional, Set
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -199,7 +199,7 @@ async def ws_waterfall(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception:
-        pass
+        logger.exception("Unexpected error in waterfall WebSocket handler")
     finally:
         waterfall_clients.discard(websocket)
         logger.info("Waterfall client disconnected — total=%d", len(waterfall_clients))
@@ -216,7 +216,7 @@ async def ws_dmr(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception:
-        pass
+        logger.exception("Unexpected error in DMR WebSocket handler")
     finally:
         dmr_clients.discard(websocket)
         logger.info("DMR metadata client disconnected — total=%d", len(dmr_clients))
@@ -233,7 +233,7 @@ async def ws_audio(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception:
-        pass
+        logger.exception("Unexpected error in audio WebSocket handler")
     finally:
         audio_clients.discard(websocket)
         logger.info("Audio client disconnected — total=%d", len(audio_clients))
@@ -258,7 +258,7 @@ async def api_status():
 
 
 @app.post("/api/tune")
-async def api_tune(freq: int | None = None, gain: float | None = None):
+async def api_tune(freq: Optional[int] = None, gain: Optional[float] = None):
     changed = {}
     if freq is not None:
         sdr.set_freq(freq)

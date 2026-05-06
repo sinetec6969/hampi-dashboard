@@ -24,6 +24,7 @@ export default function DMRPanel() {
         setFrames(prev => [f, ...prev].slice(0, 20))
       }
       ws.onclose = () => setTimeout(connect, 3000)
+      ws.onerror = () => console.error('DMR WebSocket error')
     }
     connect()
     return () => { wsRef.current?.close() }
