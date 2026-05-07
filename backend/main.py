@@ -5,6 +5,7 @@ WebSocket endpoints:
   /ws/waterfall  — binary float32 FFT frames
   /ws/dmr        — JSON DMR metadata
   /ws/audio      — binary PCM audio from DSD
+  /ws/stt        — JSON speech-to-text transcripts
 
 REST endpoints:
   GET  /api/status
@@ -17,17 +18,20 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Optional, Set
 
+import httpx
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
 from dmr import DMRDecoder
 from sdr import SDREngine
+from stt import STTDecoder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -35,6 +39,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+# RadioID.net lookup cache: dmr_id → (expire_ts, result_dict)
+_lookup_cache: dict[int, tuple[float, dict]] = {}
+LOOKUP_TTL = 3600.0   # cache entries for 1 hour
+
 INITIAL_FREQ:   int   = int(os.getenv("SDR_FREQ",        "438800000"))
 INITIAL_GAIN:   float = float(os.getenv("SDR_GAIN",      "49.6"))
 SAMPLE_RATE:    int   = int(os.getenv("SDR_SAMPLE_RATE", "2400000"))
@@ -47,10 +55,12 @@ FRONTEND_DIST:  str   = os.getenv("FRONTEND_DIST", "../frontend/dist")
 # ---------------------------------------------------------------------------
 sdr:     SDREngine
 decoder: DMRDecoder
+stt:     STTDecoder
 
 waterfall_clients: Set[WebSocket] = set()
 dmr_clients:       Set[WebSocket] = set()
 audio_clients:     Set[WebSocket] = set()
+stt_clients:       Set[WebSocket] = set()
 
 # ---------------------------------------------------------------------------
 # Broadcast helpers
@@ -91,10 +101,16 @@ async def broadcast_json(clients: Set[WebSocket], payload: dict) -> None:
 
 async def on_audio(pcm: bytes) -> None:
     await broadcast_bytes(audio_clients, pcm)
+    stt.feed_audio(pcm)
 
 
 async def on_meta(frame_dict: dict) -> None:
     await broadcast_json(dmr_clients, frame_dict)
+    stt.feed_dmr_frame(frame_dict)
+
+
+async def on_transcript(payload: dict) -> None:
+    await broadcast_json(stt_clients, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -102,34 +118,30 @@ async def on_meta(frame_dict: dict) -> None:
 # ---------------------------------------------------------------------------
 
 async def sdr_loop() -> None:
-    """
-    Main acquisition loop:
-      1. Read CHUNK_SIZE IQ samples (blocking; run in executor to avoid blocking event loop).
-      2. Compute FFT and broadcast to waterfall clients.
-      3. FM demodulate to 48 kHz int16 PCM and feed into DSD.
-    """
     loop = asyncio.get_running_loop()
     logger.info("SDR loop started — freq=%d Hz, gain=%.1f dB", sdr.freq, sdr.gain)
     try:
         while True:
-            # read_iq is synchronous/blocking — offload to thread pool
-            iq = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
-
-            # FFT for waterfall (non-blocking; pure numpy)
-            fft_bins = sdr.compute_fft(iq, n_fft=N_FFT)
-            await broadcast_bytes(waterfall_clients, fft_bins.astype(np.float32).tobytes())
-
-            # FM demodulate and pipe to DSD
-            pcm = sdr.fm_demodulate(iq, sdr.freq)
-            await decoder.write_audio(pcm)
-
-            # Yield briefly so other coroutines can run
-            await asyncio.sleep(0)
-
+            try:
+                iq = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
+                fft_bins = sdr.compute_fft(iq, n_fft=N_FFT)
+                await broadcast_bytes(waterfall_clients, fft_bins.astype(np.float32).tobytes())
+                pcm = sdr.fm_demodulate(iq, sdr.freq)
+                await decoder.write_audio(pcm)
+                await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("SDR loop error — reconnecting in 3 s")
+                await asyncio.sleep(3)
+                try:
+                    sdr.stop()
+                    await loop.run_in_executor(None, sdr.start)
+                    logger.info("SDR reconnected")
+                except Exception:
+                    logger.exception("SDR reconnect failed — will retry")
     except asyncio.CancelledError:
         logger.info("SDR loop cancelled")
-    except Exception:
-        logger.exception("Fatal error in SDR loop")
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +150,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder
+    global sdr, decoder, stt
 
     # Initialise SDR engine
     sdr = SDREngine(
@@ -150,10 +162,14 @@ async def lifespan(app: FastAPI):
     # Initialise DMR decoder
     decoder = DMRDecoder(audio_callback=on_audio, meta_callback=on_meta)
 
+    # Initialise STT decoder
+    stt = STTDecoder(transcript_callback=on_transcript)
+
     # Start hardware (blocking calls wrapped)
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, sdr.start)
     await decoder.start()
+    await stt.start()
 
     # Launch SDR acquisition loop
     task = asyncio.create_task(sdr_loop(), name="sdr-loop")
@@ -163,6 +179,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
+    await stt.stop()
     await decoder.stop()
     sdr.stop()
     logger.info("Shutdown complete")
@@ -239,6 +256,23 @@ async def ws_audio(websocket: WebSocket):
         logger.info("Audio client disconnected — total=%d", len(audio_clients))
 
 
+@app.websocket("/ws/stt")
+async def ws_stt(websocket: WebSocket):
+    await websocket.accept()
+    stt_clients.add(websocket)
+    logger.info("STT client connected — total=%d", len(stt_clients))
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in STT WebSocket handler")
+    finally:
+        stt_clients.discard(websocket)
+        logger.info("STT client disconnected — total=%d", len(stt_clients))
+
+
 # ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
@@ -253,6 +287,7 @@ async def api_status():
             "waterfall": len(waterfall_clients),
             "dmr":       len(dmr_clients),
             "audio":     len(audio_clients),
+            "stt":       len(stt_clients),
         },
     }
 
@@ -260,13 +295,52 @@ async def api_status():
 @app.post("/api/tune")
 async def api_tune(freq: Optional[int] = None, gain: Optional[float] = None):
     changed = {}
-    if freq is not None:
-        sdr.set_freq(freq)
-        changed["freq"] = freq
-    if gain is not None:
-        sdr.set_gain(gain)
-        changed["gain"] = gain
+    try:
+        if freq is not None:
+            sdr.set_freq(freq)
+            changed["freq"] = freq
+        if gain is not None:
+            sdr.set_gain(gain)
+            changed["gain"] = gain
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"SDR unavailable: {exc}")
     return {"status": "ok", "changed": changed}
+
+
+@app.get("/api/lookup/{dmr_id}")
+async def api_lookup(dmr_id: int):
+    """Look up a DMR ID on RadioID.net and return callsign + name (cached 1 h)."""
+    now = time.monotonic()
+    if dmr_id in _lookup_cache:
+        expires, cached = _lookup_cache[dmr_id]
+        if now < expires:
+            return cached
+
+    url = f"https://www.radioid.net/api/dmr/user/?id={dmr_id}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            data = r.json()
+    except Exception as exc:
+        logger.warning("RadioID lookup failed for %d: %s", dmr_id, exc)
+        return {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": ""}
+
+    results = data.get("results", [])
+    if results:
+        u = results[0]
+        result = {
+            "dmr_id":   dmr_id,
+            "callsign": u.get("callsign", ""),
+            "name":     f"{u.get('fname', '')} {u.get('surname', '')}".strip(),
+            "city":     u.get("city", ""),
+            "state":    u.get("state", ""),
+        }
+    else:
+        result = {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": ""}
+
+    _lookup_cache[dmr_id] = (now + LOOKUP_TTL, result)
+    return result
 
 
 # ---------------------------------------------------------------------------

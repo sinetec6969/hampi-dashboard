@@ -40,7 +40,7 @@ export default function Waterfall({ centerFreqHz }: Props) {
     })
     ro.observe(container)
 
-    const ws = new WebSocket('/ws/waterfall')
+    const ws = new WebSocket(`ws://${location.host}/ws/waterfall`)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
     ws.onmessage = e => { rowBuf.current.push(new Float32Array(e.data)) }
