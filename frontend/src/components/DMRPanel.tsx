@@ -82,7 +82,7 @@ export default function DMRPanel() {
         {activeSrc ? (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span className="badge badge-blue">TS{activeTs}</span>
+              <span className="badge badge-blue">TS{activeTs + 1}</span>
               {activeDst > 0 && (
                 <span style={{ color: '#888' }}>
                   TG&nbsp;<span style={{ color: '#fff' }}>{activeDst}</span>
@@ -105,7 +105,7 @@ export default function DMRPanel() {
       <div style={{ overflowY: 'auto', flex: 1 }}>
         {frames.map((f, i) => (
           <div className="dmr-row" key={i} style={{ opacity: 1 - i * 0.04 }}>
-            <span className="badge badge-blue">TS{f.timeslot}</span>
+            <span className="badge badge-blue">TS{f.timeslot + 1}</span>
             <span className={`badge ${f.frame_type === 'VOICE' ? 'badge-green' : 'badge-grey'}`}>{f.frame_type}</span>
             {f.src_id > 0 && <span style={{ fontSize: '0.65rem', color: '#555' }}>{f.src_id}→{f.dst_id}</span>}
             {f.errors > 0 && <span className="badge badge-red">E:{f.errors}</span>}

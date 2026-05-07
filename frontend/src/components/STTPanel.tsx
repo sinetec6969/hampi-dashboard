@@ -67,7 +67,7 @@ export default function STTPanel() {
         )}
         {entries.map(e => (
           <div key={e.id} className="stt-entry">
-            <span className="badge badge-blue">TS{e.timeslot}</span>
+            <span className="badge badge-blue">TS{e.timeslot + 1}</span>
             <span className="stt-time">{new Date(e.ts * 1000).toLocaleTimeString()}</span>
             <span className="stt-text">{e.text}</span>
           </div>

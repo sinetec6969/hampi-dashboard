@@ -3,7 +3,7 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and transcribes speech to text — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.3 — th3r3i5n0g0d
+**Version:** 0.0.3_all_ur_base_r_belong_to_us
 
 ---
 
@@ -144,6 +144,36 @@ RTL-SDR dongle
                                     └── DMRFrame + PCM → STTDecoder (faster-whisper)
                                                               └── transcript → ws/stt → browser
 ```
+
+---
+
+## Version History
+
+### 0.0.3_all_ur_base_r_belong_to_us
+- **Fix: DMR audio never reached STT** — DSD's portaudio backend cannot write decoded PCM to a subprocess socket pipe (`-o -` silently dropped all audio). Switched to `-n -w /tmp/dsd_audio.wav`: DSD writes decoded audio to a WAV file via standard file I/O, which works correctly. Backend streams PCM from the file continuously.
+- **Fix: Timeslot displayed as TS0/TS1** — DSD uses 0-indexed slots (SLOT0/SLOT1); DMR convention is TS1/TS2. Frontend now displays `timeslot + 1`.
+- **Fix: DSD stderr now captured** — previously discarded (`DEVNULL`); now piped and logged to `/tmp/dsd_stderr.log` for LC header debugging.
+- **Fix: DSD stdout is now pure text** — removed the binary/text stream-splitter entirely now that audio travels on a separate path. `_read_stdout` uses `readline()` cleanly.
+- **STT energy thresholds lowered** — `ENERGY_START` 600 → 300, `ENERGY_HOLD` 200 → 100. AMBE vocoder decoded audio has lower RMS than natural speech; old thresholds were gating out real voice.
+- **Improved LC regex coverage** — added patterns for DSD's `CC: X SLOT: X SRC: X DST: X GRP: X` and `mfid:` formats; ANSI escape codes stripped before parsing.
+- **Audio flow diagnostics** — STT logs chunk count, max RMS, and voice-active state every 500 chunks so audio health is visible in the backend log.
+
+### 0.0.3 — th3r3i5n0g0d
+- Fixed `local_files_only=True` on Whisper model load (prevented IPv6 Hugging Face timeout on Pi)
+- Fixed DSD output buffering with `stdbuf -oL`
+- Fixed DMR sync dot — text/binary stream splitter on DSD stdout
+- Fixed timeslot regex — require brackets around active slot label
+- SDR loop auto-reconnects on `rtl_tcp` drop
+- Tune endpoint returns HTTP 503 instead of 500 on SDR error
+
+### 0.0.2 — Initial public release
+- FastAPI backend, React/Vite frontend
+- Live waterfall (1024-point FFT, WebSocket)
+- DMR decode via DSD, frame metadata over WebSocket
+- DSD audio playback via Web Audio API
+- faster-whisper STT with dual VAD (DMR frame + energy)
+- RadioID.net lookup with 1-hour cache
+- Tune control (frequency + gain)
 
 ---
 

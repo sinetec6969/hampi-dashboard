@@ -32,8 +32,9 @@ MAX_BUFFER_S      = 30     # rolling window cap
 PRE_ROLL_S        = 0.4    # audio kept before voice-start
 
 # Energy VAD thresholds (int16 RMS scale, 0–32768)
-ENERGY_START  = int(os.getenv("STT_ENERGY_START",  "600"))   # RMS to begin a burst
-ENERGY_HOLD   = int(os.getenv("STT_ENERGY_HOLD",   "200"))   # RMS to keep a burst going
+# DSD decoded AMBE vocoder output is low-energy; 300/100 works better than 600/200.
+ENERGY_START  = int(os.getenv("STT_ENERGY_START",  "300"))   # RMS to begin a burst
+ENERGY_HOLD   = int(os.getenv("STT_ENERGY_HOLD",   "100"))   # RMS to keep a burst going
 
 _PRE_ROLL_BYTES = int(PRE_ROLL_S    * DSD_SAMPLE_RATE * 2)
 _MAX_BYTES      = int(MAX_BUFFER_S  * DSD_SAMPLE_RATE * 2)
@@ -60,6 +61,8 @@ class STTDecoder:
         self._last_voice_ts = 0.0
         self._timeslot      = 0
         self._src_id        = 0
+        self._audio_chunks  = 0
+        self._max_rms       = 0.0
 
         self._watchdog_task: Optional[asyncio.Task] = None
 
@@ -108,6 +111,13 @@ class STTDecoder:
         if len(samples) == 0:
             return
         rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+        self._audio_chunks += 1
+        if rms > self._max_rms:
+            self._max_rms = rms
+        if self._audio_chunks % 500 == 0:
+            logger.info("Audio stats: chunks=%d max_rms=%.0f voice_active=%s buf=%d bytes",
+                        self._audio_chunks, self._max_rms, self._voice_active, len(self._pcm_buffer))
+            self._max_rms = 0.0
 
         if rms >= ENERGY_START:
             if not self._voice_active:
