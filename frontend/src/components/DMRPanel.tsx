@@ -8,6 +8,8 @@ interface DMRFrame {
   src_id: number
   dst_id: number
   group: boolean
+  alias: string
+  color_code: number
   raw_line: string
 }
 
@@ -19,12 +21,14 @@ interface LookupResult {
 }
 
 export default function DMRPanel() {
-  const [frames, setFrames]       = useState<DMRFrame[]>([])
-  const [synced, setSynced]       = useState(false)
-  const [lookup, setLookup]       = useState<LookupResult | null>(null)
-  const [activeSrc, setActiveSrc] = useState(0)
-  const [activeDst, setActiveDst] = useState(0)
-  const [activeTs,  setActiveTs]  = useState(0)
+  const [frames, setFrames]         = useState<DMRFrame[]>([])
+  const [synced, setSynced]         = useState(false)
+  const [lookup, setLookup]         = useState<LookupResult | null>(null)
+  const [activeSrc, setActiveSrc]   = useState(0)
+  const [activeDst, setActiveDst]   = useState(0)
+  const [activeTs,  setActiveTs]    = useState(0)
+  const [activeAlias, setActiveAlias] = useState('')
+  const [activeCC, setActiveCC]     = useState(0)
 
   const wsRef      = useRef<WebSocket | null>(null)
   const syncTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -46,15 +50,19 @@ export default function DMRPanel() {
 
         if (f.frame_type === 'VOICE') {
           setActiveTs(f.timeslot)
+          if (f.color_code) setActiveCC(f.color_code)
           if (f.dst_id) setActiveDst(f.dst_id)
+          if (f.alias) setActiveAlias(f.alias)
           if (f.src_id && f.src_id !== lastSrcRef.current) {
             lastSrcRef.current = f.src_id
             setActiveSrc(f.src_id)
             setLookup(null)
-            fetch(`/api/lookup/${f.src_id}`)
-              .then(r => r.json())
-              .then((d: LookupResult) => setLookup(d))
-              .catch(() => {})
+            if (!f.alias) {
+              fetch(`/api/lookup/${f.src_id}`)
+                .then(r => r.json())
+                .then((d: LookupResult) => setLookup(d))
+                .catch(() => {})
+            }
           }
         }
 
@@ -68,6 +76,12 @@ export default function DMRPanel() {
     return () => { wsRef.current?.close() }
   }, [])
 
+  const callsignLine = activeAlias
+    ? activeAlias
+    : lookup
+      ? `${lookup.callsign || '—'}  ${lookup.name || ''}${lookup.city ? '  ' + lookup.city : ''}${lookup.state ? ', ' + lookup.state : ''}`
+      : activeSrc ? 'Looking up…' : ''
+
   return (
     <div className="panel" style={{ flex: '2', overflowY: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
@@ -75,6 +89,7 @@ export default function DMRPanel() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <div className={`sync-dot ${synced ? 'active' : ''}`} />
         <span className="panel-title">DMR Decode</span>
+        {activeCC > 0 && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#444' }}>CC{activeCC}</span>}
       </div>
 
       {/* Active call info */}
@@ -91,9 +106,7 @@ export default function DMRPanel() {
               <span style={{ color: '#aaa' }}>ID&nbsp;<span style={{ color: '#fff' }}>{activeSrc}</span></span>
             </div>
             <div style={{ marginTop: 3, color: '#00ff88', fontWeight: 'bold', fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {lookup
-                ? `${lookup.callsign || '—'}  ${lookup.name || ''}${lookup.city ? '  ' + lookup.city : ''}${lookup.state ? ', ' + lookup.state : ''}`
-                : activeSrc ? 'Looking up…' : ''}
+              {callsignLine}
             </div>
           </>
         ) : (
@@ -107,7 +120,12 @@ export default function DMRPanel() {
           <div className="dmr-row" key={i} style={{ opacity: 1 - i * 0.04 }}>
             <span className="badge badge-blue">TS{f.timeslot + 1}</span>
             <span className={`badge ${f.frame_type === 'VOICE' ? 'badge-green' : 'badge-grey'}`}>{f.frame_type}</span>
-            {f.src_id > 0 && <span style={{ fontSize: '0.65rem', color: '#555' }}>{f.src_id}→{f.dst_id}</span>}
+            {f.src_id > 0 && (
+              <span style={{ fontSize: '0.65rem', color: '#aaa' }}>
+                {f.alias || f.src_id}
+                {f.dst_id > 0 && <span style={{ color: '#555' }}>→TG{f.dst_id}</span>}
+              </span>
+            )}
             {f.errors > 0 && <span className="badge badge-red">E:{f.errors}</span>}
           </div>
         ))}

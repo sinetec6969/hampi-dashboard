@@ -3,7 +3,9 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and transcribes speech to text — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.3_all_ur_base_r_belong_to_us
+**Version:** 0.0.4-1_dsdfmehatesme
+
+> ⚠️ **Current state:** The dashboard is more broken than working, but the pieces are coming together.
 
 ---
 
@@ -148,6 +150,18 @@ RTL-SDR dongle
 ---
 
 ## Version History
+
+### 0.0.4-1_dsdfmehatesme
+- **Switch decoder: dsd → dsd-fme** — original DSD never output LC header data (src/dst IDs) to any accessible stream; dsd-fme outputs structured metadata to stderr including talkgroup, DMR ID, talker alias, and color code
+- **DMR IDs and talkgroups now decode correctly** — `TGT=X SRC=Y` parsed from dsd-fme stderr
+- **Timeslot fix** — dsd-fme correctly identifies TS1/TS2; stopped LC lines from overriding the slot detected in BS-mode bracket notation (`[slot2]`); slots now correctly show TS2 for TS2 traffic
+- **Talker alias cleanup** — strips ` DMR ID` suffix and trailing bare DMR ID numbers that some radios append; alias assembled incrementally across dsd-fme blocks and never replaced by a shorter/partial block
+- **Alias cleared on new call** — VLC (Voice LC Header) now resets slot context so a previous caller's name doesn't persist into the next transmission
+- **New Contacts panel** — accumulates callers heard this session, each callsign links directly to `qrz.com/db/{callsign}`; falls back to RadioID.net lookup when no talker alias is broadcast
+- **Dashboard script** — `dashboard` now builds the frontend and serves everything through FastAPI on port 8000; eliminates Vite dev server and its WebSocket proxy race condition (no more port 5173)
+- **Waterfall fix** — replaced self-copy `drawImage(canvas → itself)` with ping-pong double buffer; debounced ResizeObserver to prevent infinite layout loop that was crashing Firefox on Pi
+- **AudioPlayer sample rate** — fixed 6× pitch error; context stays at 48 kHz for hardware compatibility, buffer declared at 8 kHz (dsd-fme AMBE output rate) so browser resamples correctly
+- **FM LPF tightened** — cutoff 15 kHz → 6 kHz for 12.5 kHz DMR channel; reduces adjacent channel noise into the demodulator
 
 ### 0.0.3_all_ur_base_r_belong_to_us
 - **Fix: DMR audio never reached STT** — DSD's portaudio backend cannot write decoded PCM to a subprocess socket pipe (`-o -` silently dropped all audio). Switched to `-n -w /tmp/dsd_audio.wav`: DSD writes decoded audio to a WAV file via standard file I/O, which works correctly. Backend streams PCM from the file continuously.

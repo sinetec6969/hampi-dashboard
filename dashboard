@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -e
+
+REPO="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+
+# Build the frontend into dist/ so FastAPI can serve it directly.
+# This eliminates the Vite dev server and its WebSocket proxy entirely —
+# all traffic (UI + WebSockets) goes through one port (8000).
+echo "[hampi] Building frontend..."
+cd "$REPO/frontend"
+npm run build 2>&1 | tail -3
+
+echo "[hampi] Starting backend..."
+cd "$REPO/backend"
+source venv/bin/activate
+python main.py > /tmp/hampi-backend.log 2>&1 &
+BACKEND_PID=$!
+
+for i in $(seq 1 30); do
+    grep -q "Application startup complete" /tmp/hampi-backend.log 2>/dev/null && break
+    sleep 0.5
+done
+
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+echo "[hampi] Dashboard ready — http://${LOCAL_IP}:8000"
+echo "[hampi] Logs: /tmp/hampi-backend.log"
+echo "[hampi] Press Ctrl+C to stop."
+
+trap "echo; echo '[hampi] Stopping...'; kill $BACKEND_PID 2>/dev/null; pkill -f 'rtl_tcp' 2>/dev/null; pkill -f 'dsd-fme' 2>/dev/null; exit 0" INT TERM
+
+wait

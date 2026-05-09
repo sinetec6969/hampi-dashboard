@@ -51,10 +51,12 @@ class SDREngine:
         self._prev_sample: complex = 0 + 0j
 
         # Build decimation filter once (2.4 MHz -> 48 kHz, ratio=50)
+        # Cutoff 6 kHz: DMR uses 12.5 kHz channel spacing with ±1944 Hz deviation;
+        # 6 kHz passes the full DMR signal while rejecting adjacent channel noise.
         self._decim_ratio = self.sample_rate // 48_000  # 50
         self._fm_lpf = firwin(
             numtaps=64,
-            cutoff=15_000,
+            cutoff=6_000,
             fs=self.sample_rate,
             window="hamming",
         )

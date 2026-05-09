@@ -5,6 +5,7 @@ import DMRPanel from './components/DMRPanel'
 import AudioPlayer from './components/AudioPlayer'
 import Controls from './components/Controls'
 import STTPanel from './components/STTPanel'
+import ContactsPanel from './components/ContactsPanel'
 
 export default function App() {
   const [freq, setFreq] = useState(438800000)
@@ -24,6 +25,7 @@ export default function App() {
         </div>
         <div className="bottom-row">
           <DMRPanel/>
+          <ContactsPanel/>
           <STTPanel/>
           <AudioPlayer/>
         </div>

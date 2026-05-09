@@ -1,22 +1,24 @@
 """
-dmr.py - Async DMR decoder wrapping the DSD (Digital Speech Decoder) binary.
+dmr.py - Async DMR decoder wrapping dsd-fme.
 
-DSD command line used:
-    dsd -i - -n -w /tmp/dsd_audio.fifo -fr -v 10
+dsd-fme command:
+    dsd-fme -i - -fs -w /tmp/dsd_audio.wav
 
-  -i -   read raw int16 PCM from stdin
-  -n     suppress portaudio audio output (audio goes to -w only)
-  -w     write decoded audio as WAV to a named FIFO pipe
-  -fr    force DMR/MOTOTRBO framing
-  -v 10  verbose level 10
+  -i -   read raw 48kHz int16 PCM from stdin (same as old dsd)
+  -fs    force DMR BS/MS Simplex (Tier II repeater)
+  -w     write decoded AMBE audio to WAV file (bypasses portaudio)
 
-DSD's portaudio backend cannot write to a socket fd (what subprocess PIPE
-creates), so -o - silently produces no audio. Using -w with a named FIFO
-routes decoded PCM through normal file I/O which works reliably.
+dsd-fme outputs ALL metadata to stderr (not stdout).
+stdout is ignored.  stderr contains lines like:
 
-stdout → pure text metadata lines → DMR metadata parser
-FIFO   → WAV header (44 bytes) + raw int16 PCM at 8000 Hz → audio callback
-stderr → LC header lines (CC/mfid) with src/dst → slot context
+  14:43:58 Sync: +DMR   slot1  [slot2] | Color Code=01 | IDLE
+  14:43:58 Sync: +DMR MS/DM MODE/MONO | Color Code=01 | VLC
+   SLOT 1 TGT=91 SRC=3168750 Group Call
+  14:43:59 Sync: +DMR MS/DM MODE/MONO | Color Code=01 | VC*
+   Slot 0 - Talker Alias Block Num: 1; Valid Block; Talker Alias: KF5DIB
+
+Timeslots: dsd-fme uses 1-indexed slot numbers (slot1=TS1, slot2=TS2).
+We store 0-indexed internally (subtract 1) to match frontend timeslot+1 display.
 """
 
 import asyncio
@@ -29,31 +31,52 @@ from typing import Callable, Awaitable, Optional
 logger = logging.getLogger(__name__)
 
 AUDIO_WAV     = "/tmp/dsd_audio.wav"
-WAV_HDR_BYTES = 44    # standard RIFF WAV header size to skip
-AUDIO_CHUNK   = 3200  # bytes per read (200 ms at 8000 Hz 16-bit)
-AUDIO_POLL_S  = 0.02  # seconds to wait when no new PCM data yet
+WAV_HDR_BYTES = 44
+AUDIO_CHUNK   = 3200   # 200 ms at 8000 Hz 16-bit
+AUDIO_POLL_S  = 0.02
 
-# --- Regex patterns -------------------------------------------------------
-# Active slot has brackets: [SLOT0] or [slot0]. Inactive is lowercase no-brackets: slot1.
-_RE_SLOT0  = re.compile(r'\[(?:SLOT|TS|TIMESLOT)\s*0\]', re.IGNORECASE)
-_RE_SLOT1  = re.compile(r'\[(?:SLOT|TS|TIMESLOT)\s*1\]', re.IGNORECASE)
-# Frame type
-_RE_FRAME  = re.compile(r'\b(VOICE|TLC|MBC|DATA|HDR|HEADER)\b', re.IGNORECASE)
-# Error field
-_RE_ERRORS = re.compile(r'e:\s*([EO.]+)', re.IGNORECASE)
-# Source/destination — multiple DSD output formats
-_RE_SRC    = re.compile(r'\bsrc(?:_id)?\s*[=:]\s*(\d+)', re.IGNORECASE)
-_RE_DST    = re.compile(r'\bdst(?:_id|_tg)?\s*[=:]\s*(\d+)', re.IGNORECASE)
-_RE_SRC2   = re.compile(r'\bSource\s*:\s*(\d+)', re.IGNORECASE)
-_RE_DST2   = re.compile(r'\bDestination\s+(?:Talkgroup\s*)?:\s*(\d+)', re.IGNORECASE)
-_RE_CC_SRC = re.compile(r'\bSRC\s*[=:]\s*(\d+)', re.IGNORECASE)
-_RE_CC_DST = re.compile(r'\bDST\s*[=:]\s*(\d+)', re.IGNORECASE)
-_RE_CC_SLOT= re.compile(r'\b(?:SLOT|TS)\s*[=:]\s*([01])\b', re.IGNORECASE)
-# Group call indicator
-_RE_GRP    = re.compile(r'\b(?:GRP|GROUP|TGID|Group:\s*Yes)\b', re.IGNORECASE)
-_RE_GRP2   = re.compile(r'\bGRP\s*[=:]\s*([01])\b', re.IGNORECASE)
-# Strip ANSI escape codes before parsing
-_RE_ANSI   = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+# --- Regex patterns for dsd-fme stderr output ----------------------------
+
+# Sync line with bracket slot:  "HH:MM:SS Sync: +DMR  slot1  [slot2] | CC=N | FTYPE"
+_RE_SYNC_BS   = re.compile(
+    r'\d+:\d+:\d+\s+Sync:.*?\[slot(\d+)\].*?\|\s*Color Code=(\d+)\s*\|\s*(\S+)',
+    re.IGNORECASE,
+)
+# Sync line without bracket slot (MS/DM simplex mode):
+# "HH:MM:SS Sync: +DMR MS/DM ... | Color Code=N | FTYPE"
+_RE_SYNC_DM   = re.compile(
+    r'\d+:\d+:\d+\s+Sync:.*?\|\s*Color Code=(\d+)\s*\|\s*(\S+)',
+    re.IGNORECASE,
+)
+# LC data line:  " SLOT N TGT=X SRC=Y Group/Private Call"
+_RE_LC        = re.compile(
+    r'\bSLOT\s+(\d+)\s+TGT=(\d+)\s+SRC=(\d+)\s+(Group|Private)\s+Call',
+    re.IGNORECASE,
+)
+# Talker alias:  " Slot N - Talker Alias Block Num: N; Valid Block; Talker Alias: KF5DIB"
+_RE_ALIAS     = re.compile(r'Talker Alias:\s*(.+)', re.IGNORECASE)
+# Strip ANSI escape codes
+_RE_ANSI      = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+
+_FTYPE_MAP = {
+    'VLC':  'VOICE',   # Voice LC header
+    'VC*':  'VOICE',   # Voice continuation
+    'VCALL':'VOICE',
+    'IDLE': 'IDLE',
+    'PI':   'DATA',
+    'CACH': 'DATA',
+    'DATA': 'DATA',
+    'TLC':  'TLC',
+    'MBC':  'MBC',
+}
+
+def _map_ftype(raw: str) -> str:
+    raw = raw.upper().rstrip('*').strip()
+    for key, val in _FTYPE_MAP.items():
+        if raw.startswith(key):
+            return val
+    return 'UNKNOWN'
+
 # -------------------------------------------------------------------------
 
 AudioCallback = Callable[[bytes], Awaitable[None]]
@@ -62,124 +85,62 @@ MetaCallback  = Callable[[dict], Awaitable[None]]
 
 @dataclass
 class DMRFrame:
-    sync:       bool = False
-    timeslot:   int  = 0
-    frame_type: str  = "UNKNOWN"
-    errors:     int  = 0
-    src_id:     int  = 0
-    dst_id:     int  = 0
-    group:      bool = True
-    raw_line:   str  = ""
+    sync:        bool = False
+    timeslot:    int  = 0        # 0-indexed (0=TS1, 1=TS2); display as timeslot+1
+    frame_type:  str  = "UNKNOWN"
+    errors:      int  = 0
+    src_id:      int  = 0
+    dst_id:      int  = 0
+    group:       bool = True
+    alias:       str  = ""       # talker alias / callsign from LRRP
+    color_code:  int  = 0
+    raw_line:    str  = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-def _parse_dmr_line(line: str) -> Optional[tuple[Optional[DMRFrame], dict]]:
-    """
-    Parse a single DSD stdout/stderr text line.
-
-    Returns (frame, lc_update) where:
-      frame      — DMRFrame if this line is a SLOT frame line, else None
-      lc_update  — dict of LC fields found (src_id, dst_id, group, timeslot)
-    """
-    line = _RE_ANSI.sub("", line).strip()
-    if not line:
-        return None, {}
-
-    lc: dict = {}
-    m = (_RE_CC_SRC.search(line) or _RE_SRC.search(line) or _RE_SRC2.search(line))
-    if m:
-        lc["src_id"] = int(m.group(1))
-    m = (_RE_CC_DST.search(line) or _RE_DST.search(line) or _RE_DST2.search(line))
-    if m:
-        lc["dst_id"] = int(m.group(1))
-    if lc:
-        grp_m = _RE_GRP2.search(line)
-        lc["group"] = (int(grp_m.group(1)) == 1) if grp_m else bool(_RE_GRP.search(line))
-
-    # Determine timeslot
-    if _RE_SLOT1.search(line):
-        timeslot, synced = 1, True
-    elif _RE_SLOT0.search(line):
-        timeslot, synced = 0, True
-    else:
-        m = _RE_CC_SLOT.search(line)
-        if m and lc:
-            lc["timeslot"] = int(m.group(1))
-            return None, lc
-        return None, lc
-
-    if lc:
-        lc["timeslot"] = timeslot
-
-    frame = DMRFrame(sync=synced, timeslot=timeslot, raw_line=line)
-
-    m = _RE_FRAME.search(line)
-    if m:
-        frame.frame_type = m.group(1).upper()
-
-    m = _RE_ERRORS.search(line)
-    if m:
-        frame.errors = m.group(1).count("E")
-
-    return frame, lc
-
-
-def _apply_lc(lc: dict, slot_ctx: dict, last_slot: int) -> int:
-    """Merge LC fields into per-slot context. Returns updated last_slot."""
-    slot = lc.get("timeslot", last_slot)
-    ctx  = slot_ctx[slot]
-    if lc.get("src_id"):
-        ctx["src_id"] = lc["src_id"]
-    if lc.get("dst_id"):
-        ctx["dst_id"] = lc["dst_id"]
-    ctx["group"] = lc.get("group", ctx["group"])
-    return last_slot
-
-
 class DMRDecoder:
-    """Async wrapper around the DSD binary."""
+    """Async wrapper around dsd-fme."""
 
-    DSD_ARGS = [
-        "stdbuf", "-o0",
-        "dsd", "-i", "-", "-n", "-w", AUDIO_WAV, "-fr", "-v", "10",
-    ]
+    DSD_ARGS = ["dsd-fme", "-i", "-", "-fs", "-w", AUDIO_WAV]
 
     def __init__(self, audio_callback: AudioCallback, meta_callback: MetaCallback):
         self._audio_cb = audio_callback
         self._meta_cb  = meta_callback
-        self._proc:       Optional[asyncio.subprocess.Process] = None
-        self._tasks:      list[asyncio.Task] = []
-        self._audio_fh:   Optional[object]   = None  # file handle for WAV reader
-        self._slot_ctx:   dict[int, dict]    = {
-            0: {"src_id": 0, "dst_id": 0, "group": True},
-            1: {"src_id": 0, "dst_id": 0, "group": True},
+        self._proc:     Optional[asyncio.subprocess.Process] = None
+        self._tasks:    list[asyncio.Task] = []
+        self._audio_fh: Optional[object]  = None
+
+        # Per-slot persistent call context (1-indexed: slot 1 and 2)
+        self._slot_ctx: dict[int, dict] = {
+            1: {"src_id": 0, "dst_id": 0, "group": True, "alias": ""},
+            2: {"src_id": 0, "dst_id": 0, "group": True, "alias": ""},
         }
-        self._last_slot = 0
+        # dsd-fme stderr parser state
+        self._active_slot  = 1   # 1-indexed
+        self._active_cc    = 0
+        self._pending_ftype = "UNKNOWN"
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        # Remove stale WAV file from a previous run
         try:
             os.unlink(AUDIO_WAV)
         except FileNotFoundError:
             pass
 
-        logger.info("Starting DSD: %s", " ".join(self.DSD_ARGS))
+        logger.info("Starting dsd-fme: %s", " ".join(self.DSD_ARGS))
         self._proc = await asyncio.create_subprocess_exec(
             *self.DSD_ARGS,
             stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        logger.info("DSD started (pid=%d)", self._proc.pid)
+        logger.info("dsd-fme started (pid=%d)", self._proc.pid)
 
-        # Wait briefly for DSD to create the WAV file, then open for reading
-        loop = asyncio.get_running_loop()
         for _ in range(50):
             if os.path.exists(AUDIO_WAV):
                 break
@@ -187,15 +148,14 @@ class DMRDecoder:
 
         if os.path.exists(AUDIO_WAV):
             self._audio_fh = open(AUDIO_WAV, "rb")
-            logger.info("Audio WAV file open — decoded PCM will flow to STT")
+            logger.info("Audio WAV file open")
         else:
-            logger.warning("DSD did not create audio WAV file — STT disabled")
+            logger.warning("dsd-fme did not create audio WAV — STT disabled")
             self._audio_fh = None
 
         self._tasks = [
-            asyncio.create_task(self._read_stdout(),    name="dsd-stdout"),
-            asyncio.create_task(self._read_stderr(),    name="dsd-stderr"),
-            asyncio.create_task(self._read_audio_wav(), name="dsd-audio"),
+            asyncio.create_task(self._read_stderr(),    name="dfme-stderr"),
+            asyncio.create_task(self._read_audio_wav(), name="dfme-audio"),
         ]
 
     async def stop(self) -> None:
@@ -226,7 +186,7 @@ class DMRDecoder:
         logger.info("DMRDecoder stopped")
 
     # ------------------------------------------------------------------
-    # Audio input (FM PCM → DSD stdin)
+    # Audio input
     # ------------------------------------------------------------------
 
     async def write_audio(self, pcm_bytes: bytes) -> None:
@@ -238,41 +198,31 @@ class DMRDecoder:
             self._proc.stdin.write(pcm_bytes)
             await self._proc.stdin.drain()
         except (BrokenPipeError, ConnectionResetError, asyncio.CancelledError):
-            logger.warning("DSD stdin pipe broken")
+            logger.warning("dsd-fme stdin pipe broken")
 
     # ------------------------------------------------------------------
     # Background tasks
     # ------------------------------------------------------------------
 
-    async def _read_stdout(self) -> None:
-        """Read DSD text metadata from stdout (pure text — no PCM mixed in)."""
-        if self._proc is None or self._proc.stdout is None:
+    async def _read_stderr(self) -> None:
+        """Parse dsd-fme stderr for DMR call metadata."""
+        if self._proc is None or self._proc.stderr is None:
             return
 
-        _dbg = open("/tmp/dsd_stdout.log", "w", buffering=1)
+        _dbg = open("/tmp/dsd_stderr.log", "w", buffering=1)
         _lines = 0
         try:
             while True:
-                line_bytes = await self._proc.stdout.readline()
+                line_bytes = await self._proc.stderr.readline()
                 if not line_bytes:
-                    logger.info("DSD stdout closed")
+                    logger.info("dsd-fme stderr closed")
                     break
                 line = line_bytes.decode("ascii", errors="replace")
                 _dbg.write(line)
                 _lines += 1
 
-                result = _parse_dmr_line(line)
-                if result is None:
-                    continue
-                frame, lc = result
-                if lc:
-                    self._last_slot = _apply_lc(lc, self._slot_ctx, self._last_slot)
+                frame = self._parse_line(line)
                 if frame is not None:
-                    self._last_slot = frame.timeslot
-                    ctx = self._slot_ctx[frame.timeslot]
-                    frame.src_id = ctx["src_id"]
-                    frame.dst_id = ctx["dst_id"]
-                    frame.group  = ctx["group"]
                     try:
                         await self._meta_cb(frame.to_dict())
                     except Exception:
@@ -280,49 +230,119 @@ class DMRDecoder:
         except asyncio.CancelledError:
             pass
         except Exception:
-            logger.exception("Unexpected error in DSD stdout reader")
+            logger.exception("Unexpected error in dsd-fme stderr reader")
         finally:
-            logger.info("DSD stdout reader done — lines=%d", _lines)
+            logger.info("dsd-fme stderr reader done — lines=%d", _lines)
             _dbg.close()
 
-    async def _read_stderr(self) -> None:
-        """Read DSD stderr for LC header lines (CC/mfid) with src/dst IDs."""
-        if self._proc is None or self._proc.stderr is None:
-            return
-        _err = open("/tmp/dsd_stderr.log", "w", buffering=1)
-        try:
-            while True:
-                line_bytes = await self._proc.stderr.readline()
-                if not line_bytes:
-                    logger.info("DSD stderr closed")
-                    break
-                line = line_bytes.decode("ascii", errors="replace")
-                _err.write(line)
-                result = _parse_dmr_line(line)
-                if result is None:
-                    continue
-                _, lc = result
-                if lc:
-                    if lc.get("src_id"):
-                        slot = lc.get("timeslot", self._last_slot)
-                        logger.info("LC from stderr TS%d src=%d dst=%d",
-                                    slot, lc.get("src_id", 0), lc.get("dst_id", 0))
-                    self._last_slot = _apply_lc(lc, self._slot_ctx, self._last_slot)
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.exception("Unexpected error in DSD stderr reader")
-        finally:
-            _err.close()
+    def _parse_line(self, raw: str) -> Optional[DMRFrame]:
+        """
+        Parse one line of dsd-fme stderr output.
+
+        Returns a DMRFrame when a Sync line is processed (the frame carries
+        whatever call state is current).  Returns None for LC/alias update
+        lines, which update internal state for the next frame.
+        """
+        line = _RE_ANSI.sub("", raw).strip()
+        if not line:
+            return None
+
+        # --- Sync line (BS mode): has [slotN] bracket notation ---
+        m = _RE_SYNC_BS.search(line)
+        if m:
+            self._active_slot   = int(m.group(1))   # 1-indexed
+            self._active_cc     = int(m.group(2))
+            raw_ftype           = m.group(3).upper()
+            self._pending_ftype = _map_ftype(raw_ftype)
+            if raw_ftype.startswith("VLC"):
+                self._clear_call(self._active_slot)
+            return self._make_frame(line)
+
+        # --- Sync line (MS/DM mode): no slot bracket, check it's a Sync line ---
+        if "Sync:" in line:
+            m = _RE_SYNC_DM.search(line)
+            if m:
+                self._active_cc     = int(m.group(1))
+                raw_ftype           = m.group(2).upper()
+                self._pending_ftype = _map_ftype(raw_ftype)
+                if raw_ftype.startswith("VLC"):
+                    self._clear_call(self._active_slot)
+                return self._make_frame(line)
+
+        # --- LC data line: update slot context ---
+        # Do NOT update _active_slot here — dsd-fme reports "SLOT 1" in
+        # MS/DM MONO mode regardless of the actual timeslot, which would
+        # override the correct slot detected from BS-mode [slotN] brackets.
+        m = _RE_LC.search(line)
+        if m:
+            tgt   = int(m.group(2))
+            src   = int(m.group(3))
+            group = m.group(4).lower() == "group"
+            slot  = self._active_slot   # trust the last Sync-line slot
+            ctx   = self._slot_ctx.get(slot, self._slot_ctx[1])
+            if tgt:
+                ctx["dst_id"] = tgt
+            if src:
+                ctx["src_id"] = src
+            ctx["group"] = group
+            if src:
+                logger.info("LC TS%d src=%d tg=%d", slot, src, tgt)
+            return None
+
+        # --- Talker alias line ---
+        m = _RE_ALIAS.search(line)
+        if m:
+            alias = m.group(1).strip()
+            # Some radios append " DMR ID" or a bare DMR ID number after the
+            # callsign (e.g. "KF5DIB DMR ID" or "KF5DIB 3168750").
+            # Strip those so the alias is a clean callsign usable in URLs.
+            alias = re.sub(r'\s+DMR\s*ID\b.*', '', alias, flags=re.IGNORECASE).strip()
+            alias = re.sub(r'\s+\d{6,}.*', '', alias).strip()
+            if alias and len(alias) > 1:
+                slot = self._active_slot
+                if slot in self._slot_ctx:
+                    current = self._slot_ctx[slot].get("alias", "")
+                    # Only update if this block is longer — alias is assembled
+                    # incrementally across blocks; never overwrite a longer value.
+                    if len(alias) >= len(current):
+                        self._slot_ctx[slot]["alias"] = alias
+                        logger.info("Alias TS%d: %s", slot, alias)
+            return None
+
+        return None
+
+    def _clear_call(self, slot: int) -> None:
+        """Reset per-call fields when a new Voice LC Header is detected."""
+        if slot in self._slot_ctx:
+            ctx = self._slot_ctx[slot]
+            ctx["src_id"] = 0
+            ctx["dst_id"] = 0
+            ctx["alias"]  = ""
+
+    def _make_frame(self, raw_line: str) -> DMRFrame:
+        """Build a DMRFrame from current parser state."""
+        slot = self._active_slot
+        ctx  = self._slot_ctx.get(slot, {"src_id": 0, "dst_id": 0, "group": True, "alias": ""})
+        return DMRFrame(
+            sync        = True,
+            timeslot    = slot - 1,   # convert to 0-indexed for frontend timeslot+1
+            frame_type  = self._pending_ftype,
+            errors      = 0,
+            src_id      = ctx["src_id"],
+            dst_id      = ctx["dst_id"],
+            group       = ctx["group"],
+            alias       = ctx.get("alias", ""),
+            color_code  = self._active_cc,
+            raw_line    = raw_line.strip(),
+        )
 
     async def _read_audio_wav(self) -> None:
-        """Read decoded PCM from DSD's WAV output file, polling for new data."""
+        """Stream decoded PCM from dsd-fme's WAV output file."""
         if self._audio_fh is None:
             return
 
         fh = self._audio_fh
 
-        # Wait for and skip the 44-byte WAV header
         header = b""
         while len(header) < WAV_HDR_BYTES:
             chunk = fh.read(WAV_HDR_BYTES - len(header))
@@ -331,25 +351,24 @@ class DMRDecoder:
             else:
                 await asyncio.sleep(AUDIO_POLL_S)
 
-        sample_rate = int.from_bytes(header[24:28], "little")
-        logger.info("Audio WAV ready — sample_rate=%d Hz, PCM flowing to STT", sample_rate)
+        sr = int.from_bytes(header[24:28], "little")
+        logger.info("Audio WAV ready — sample_rate=%d Hz", sr)
 
-        _audio_bytes = 0
+        _total = 0
         try:
             while True:
                 chunk = fh.read(AUDIO_CHUNK)
                 if chunk:
-                    _audio_bytes += len(chunk)
+                    _total += len(chunk)
                     try:
                         await self._audio_cb(chunk)
                     except Exception:
                         logger.exception("audio_callback raised an exception")
                 else:
-                    # No new data yet — yield to event loop and retry
                     await asyncio.sleep(AUDIO_POLL_S)
         except asyncio.CancelledError:
             pass
         except Exception:
             logger.exception("Unexpected error in audio WAV reader")
         finally:
-            logger.info("Audio WAV reader done — total=%d bytes", _audio_bytes)
+            logger.info("Audio WAV reader done — total=%d bytes", _total)
