@@ -3,7 +3,7 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, and plays decoded audio — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.4-2_phoenixrising
+**Version:** 0.0.4-3_phoenixroseagain
 
 ---
 
@@ -131,6 +131,12 @@ RTL-SDR dongle
 ---
 
 ## Version History
+
+### 0.0.4-3_phoenixroseagain
+- **Fix: Waterfall extremely slow** — `lfilter` (direct FIR convolution) at 2.4 MHz sample rate was running at 2.4× slower than real-time on the Pi, causing a growing socket buffer backlog and ~5 fps waterfall. Replaced with `oaconvolve` (overlap-add FFT convolution), which is 3× faster and keeps up with the data rate. Added overlap-save state (`_lpf_tail`) so the filter has correct history at every chunk boundary — no startup transient between chunks.
+- **Fix: 4 FFT frames per chunk** — was computing one waterfall line per IQ read (every ~100 ms = ~10 fps). Now spreads 4 FFT slices across each chunk, giving 40–87 waterfall lines/sec depending on buffer state.
+- **Fix: Audio choppy / underruns** — two root causes. (1) Sequential read→demod loop fed dsd-fme at 0.54× real-time: pipelined read_iq and fm_demodulate to run concurrently in the thread executor, so dsd-fme now receives audio at real-time rate. (2) WAV reader sent chunks in bursts whenever dsd-fme had buffered output, causing the browser's Web Audio scheduler to jump far ahead then stall. Added server-side pacing: tracks audio-time sent vs wall clock, sleeps when more than 100 ms ahead, resets reference on every silence gap so long pauses don't corrupt timing.
+- **Browser audio buffer** — initial jitter buffer raised 200 ms → 500 ms; underrun reset also raised to 500 ms ahead, absorbing burst/gap transitions at transmission start.
 
 ### 0.0.4-2_phoenixrising
 - **Fix: DMR contacts never populated** — `VC*` (Voice Continuation) frames were mapped to `UNKNOWN` instead of `VOICE` because `_map_ftype` stripped the trailing `*` before checking the map key `'VC*'`. The VLC header frame (correctly typed VOICE) has src_id=0 from `_clear_call`; all subsequent frames with the real src_id were `UNKNOWN`. Frontend filters on `frame_type === 'VOICE'` so no RadioID lookup ever fired and the Contacts panel stayed empty.

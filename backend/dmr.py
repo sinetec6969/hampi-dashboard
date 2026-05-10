@@ -25,6 +25,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, asdict
 from typing import Callable, Awaitable, Optional
 
@@ -358,11 +359,22 @@ class DMRDecoder:
         bits     = int.from_bytes(header[34:36], "little")
         logger.info("Audio WAV ready — sample_rate=%d Hz, channels=%d, bits=%d", sr, channels, bits)
 
+        # Pacing state: track audio-time sent vs wall-clock so we never burst
+        # more than PACE_AHEAD seconds of audio to the browser at once.
+        # Reset on every gap (empty read) so long silences don't corrupt the ref.
+        PACE_AHEAD = 0.10   # target: stay at most 100 ms ahead of real-time
+        _pace_t0:    float = 0.0
+        _pace_bytes: int   = 0
+        mono_rate = sr * 2  # bytes per second of mono int16 at sample rate sr
+
         _total = 0
         try:
             while True:
                 chunk = fh.read(AUDIO_CHUNK)
                 if not chunk:
+                    # Gap — reset pacing so next burst starts with a clean reference
+                    _pace_t0    = 0.0
+                    _pace_bytes = 0
                     await asyncio.sleep(AUDIO_POLL_S)
                     continue
 
@@ -372,6 +384,17 @@ class DMRDecoder:
                     stereo = np.frombuffer(chunk, dtype=np.int16).reshape(-1, 2)
                     mixed  = stereo.astype(np.int32).sum(axis=1) // 2
                     chunk  = mixed.astype(np.int16).tobytes()
+
+                # Pace delivery: if we're ahead of wall-clock by more than PACE_AHEAD,
+                # sleep until we're back within a 20 ms margin.
+                if _pace_t0 == 0.0:
+                    _pace_t0 = time.monotonic()
+                _pace_bytes += len(chunk)
+                audio_s = _pace_bytes / mono_rate
+                wall_s  = time.monotonic() - _pace_t0
+                ahead_s = audio_s - wall_s
+                if ahead_s > PACE_AHEAD:
+                    await asyncio.sleep(ahead_s - 0.02)
 
                 _total += len(chunk)
                 try:

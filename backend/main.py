@@ -45,6 +45,7 @@ INITIAL_FREQ:   int   = int(os.getenv("SDR_FREQ",        "438800000"))
 INITIAL_GAIN:   float = float(os.getenv("SDR_GAIN",      "49.6"))
 SAMPLE_RATE:    int   = int(os.getenv("SDR_SAMPLE_RATE", "2400000"))
 CHUNK_SIZE:     int   = int(os.getenv("SDR_CHUNK_SIZE",  "131072"))
+FFT_PER_CHUNK:  int   = 4   # waterfall lines emitted per IQ read
 N_FFT:          int   = 1024
 FRONTEND_DIST:  str   = os.getenv("FRONTEND_DIST", "../frontend/dist")
 
@@ -108,21 +109,48 @@ async def on_meta(frame_dict: dict) -> None:
 # ---------------------------------------------------------------------------
 
 async def sdr_loop() -> None:
+    """
+    Pipelined SDR loop: read_iq and fm_demodulate run concurrently in the
+    thread-pool executor so audio is written to dsd-fme at real-time rate.
+
+    Timeline per iteration (read ≈ 54 ms, demod ≈ 46 ms):
+      [read N+1 ──────────────────54ms──]
+      [        demod N ──46ms──] [write]
+      total wall time ≈ 54 ms  (not 54+46=100 ms as in the sequential version)
+    """
     loop = asyncio.get_running_loop()
     logger.info("SDR loop started — freq=%d Hz, gain=%.1f dB", sdr.freq, sdr.gain)
+    step        = CHUNK_SIZE // FFT_PER_CHUNK
+    read_future = None
     try:
         while True:
             try:
-                iq = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
-                fft_bins = sdr.compute_fft(iq, n_fft=N_FFT)
-                await broadcast_bytes(waterfall_clients, fft_bins.tobytes())
+                # First pass or after reconnect: no read in flight yet — block once.
+                if read_future is None:
+                    iq = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
+                else:
+                    iq = await read_future
+
+                # Kick off the next read immediately so it runs while we demodulate.
+                read_future = loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
+
+                # Waterfall: spread FFT_PER_CHUNK slices across the chunk.
+                for k in range(FFT_PER_CHUNK):
+                    fft_bins = sdr.compute_fft(iq[k * step:], n_fft=N_FFT)
+                    await broadcast_bytes(waterfall_clients, fft_bins.tobytes())
+
+                # Demodulate current chunk (runs concurrently with read_future).
                 pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, sdr.freq)
                 await decoder.write_audio(pcm)
                 await asyncio.sleep(0)
+
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("SDR loop error — reconnecting in 3 s")
+                if read_future is not None:
+                    read_future.cancel()
+                    read_future = None
                 await asyncio.sleep(3)
                 try:
                     sdr.stop()

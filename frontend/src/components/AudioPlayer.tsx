@@ -12,7 +12,7 @@ export default function AudioPlayer() {
   function start() {
     const ctx = new AudioContext({ sampleRate: 48000 })
     ctxRef.current = ctx
-    nextTimeRef.current = ctx.currentTime + 0.2
+    nextTimeRef.current = ctx.currentTime + 0.5
 
     setStatus('connecting')
     const ws = new WebSocket('/ws/audio')
@@ -34,7 +34,7 @@ export default function AudioPlayer() {
       const now = ctx.currentTime
       if (nextTimeRef.current < now) {
         setUnderruns(u => u+1)
-        nextTimeRef.current = now + 0.1
+        nextTimeRef.current = now + 0.5
       }
       src.start(nextTimeRef.current)
       nextTimeRef.current += buf.duration

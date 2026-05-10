@@ -10,7 +10,7 @@ import time
 from typing import Optional
 
 import numpy as np
-from scipy.signal import firwin, lfilter
+from scipy.signal import firwin, oaconvolve
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,11 @@ class SDREngine:
             fs=self.sample_rate,
             window="hamming",
         )
+
+        # Overlap-save state: last (numtaps-1) samples from the previous chunk.
+        # Prepended to each new chunk so the FIR filter has correct past history
+        # at every chunk boundary (no startup transient between chunks).
+        self._lpf_tail = np.zeros(len(self._fm_lpf) - 1, dtype=np.complex64)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -233,8 +238,14 @@ class SDREngine:
             shift = np.exp(-2j * np.pi * freq_offset * t).astype(np.complex64)
             iq = iq * shift
 
-        # 2. Low-pass filter
-        filtered = lfilter(self._fm_lpf, [1.0], iq).astype(np.complex64)
+        # 2. Low-pass filter via overlap-add (oaconvolve).
+        # Prepend the saved tail from the previous chunk so the filter has correct
+        # history at the boundary — no startup transient between chunks.
+        M = len(self._fm_lpf)
+        padded   = np.concatenate([self._lpf_tail, iq])
+        full_out = oaconvolve(padded, self._fm_lpf, mode="full")
+        filtered = full_out[M - 1 : M - 1 + len(iq)].astype(np.complex64)
+        self._lpf_tail = iq[-(M - 1):]
 
         # 3. Decimate
         decimated = filtered[:: self._decim_ratio]
