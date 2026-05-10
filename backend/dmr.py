@@ -28,6 +28,8 @@ import re
 from dataclasses import dataclass, asdict
 from typing import Callable, Awaitable, Optional
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 AUDIO_WAV     = "/tmp/dsd_audio.wav"
@@ -60,7 +62,7 @@ _RE_ANSI      = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
 _FTYPE_MAP = {
     'VLC':  'VOICE',   # Voice LC header
-    'VC*':  'VOICE',   # Voice continuation
+    'VC':   'VOICE',   # Voice continuation (dsd-fme outputs VC*; rstrip removes the *)
     'VCALL':'VOICE',
     'IDLE': 'IDLE',
     'PI':   'DATA',
@@ -351,21 +353,31 @@ class DMRDecoder:
             else:
                 await asyncio.sleep(AUDIO_POLL_S)
 
-        sr = int.from_bytes(header[24:28], "little")
-        logger.info("Audio WAV ready — sample_rate=%d Hz", sr)
+        channels = int.from_bytes(header[22:24], "little")
+        sr       = int.from_bytes(header[24:28], "little")
+        bits     = int.from_bytes(header[34:36], "little")
+        logger.info("Audio WAV ready — sample_rate=%d Hz, channels=%d, bits=%d", sr, channels, bits)
 
         _total = 0
         try:
             while True:
                 chunk = fh.read(AUDIO_CHUNK)
-                if chunk:
-                    _total += len(chunk)
-                    try:
-                        await self._audio_cb(chunk)
-                    except Exception:
-                        logger.exception("audio_callback raised an exception")
-                else:
+                if not chunk:
                     await asyncio.sleep(AUDIO_POLL_S)
+                    continue
+
+                # dsd-fme outputs stereo: TS1 on left, TS2 on right.
+                # Mix down to mono so playback and STT see the correct sample rate.
+                if channels == 2 and bits == 16:
+                    stereo = np.frombuffer(chunk, dtype=np.int16).reshape(-1, 2)
+                    mixed  = stereo.astype(np.int32).sum(axis=1) // 2
+                    chunk  = mixed.astype(np.int16).tobytes()
+
+                _total += len(chunk)
+                try:
+                    await self._audio_cb(chunk)
+                except Exception:
+                    logger.exception("audio_callback raised an exception")
         except asyncio.CancelledError:
             pass
         except Exception:

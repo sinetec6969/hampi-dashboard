@@ -4,7 +4,6 @@ import Waterfall from './components/Waterfall'
 import DMRPanel from './components/DMRPanel'
 import AudioPlayer from './components/AudioPlayer'
 import Controls from './components/Controls'
-import STTPanel from './components/STTPanel'
 import ContactsPanel from './components/ContactsPanel'
 
 export default function App() {
@@ -26,8 +25,7 @@ export default function App() {
         <div className="bottom-row">
           <DMRPanel/>
           <ContactsPanel/>
-          <STTPanel/>
-          <AudioPlayer/>
+<AudioPlayer/>
         </div>
       </div>
     </>

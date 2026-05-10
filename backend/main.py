@@ -5,7 +5,6 @@ WebSocket endpoints:
   /ws/waterfall  — binary float32 FFT frames
   /ws/dmr        — JSON DMR metadata
   /ws/audio      — binary PCM audio from DSD
-  /ws/stt        — JSON speech-to-text transcripts
 
 REST endpoints:
   GET  /api/status
@@ -31,7 +30,6 @@ from starlette.websockets import WebSocketState
 
 from dmr import DMRDecoder
 from sdr import SDREngine
-from stt import STTDecoder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -55,12 +53,10 @@ FRONTEND_DIST:  str   = os.getenv("FRONTEND_DIST", "../frontend/dist")
 # ---------------------------------------------------------------------------
 sdr:     SDREngine
 decoder: DMRDecoder
-stt:     STTDecoder
 
 waterfall_clients: Set[WebSocket] = set()
 dmr_clients:       Set[WebSocket] = set()
 audio_clients:     Set[WebSocket] = set()
-stt_clients:       Set[WebSocket] = set()
 
 # ---------------------------------------------------------------------------
 # Broadcast helpers
@@ -101,16 +97,10 @@ async def broadcast_json(clients: Set[WebSocket], payload: dict) -> None:
 
 async def on_audio(pcm: bytes) -> None:
     await broadcast_bytes(audio_clients, pcm)
-    stt.feed_audio(pcm)
 
 
 async def on_meta(frame_dict: dict) -> None:
     await broadcast_json(dmr_clients, frame_dict)
-    stt.feed_dmr_frame(frame_dict)
-
-
-async def on_transcript(payload: dict) -> None:
-    await broadcast_json(stt_clients, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +115,8 @@ async def sdr_loop() -> None:
             try:
                 iq = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
                 fft_bins = sdr.compute_fft(iq, n_fft=N_FFT)
-                await broadcast_bytes(waterfall_clients, fft_bins.astype(np.float32).tobytes())
-                pcm = sdr.fm_demodulate(iq, sdr.freq)
+                await broadcast_bytes(waterfall_clients, fft_bins.tobytes())
+                pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, sdr.freq)
                 await decoder.write_audio(pcm)
                 await asyncio.sleep(0)
             except asyncio.CancelledError:
@@ -150,7 +140,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, stt
+    global sdr, decoder
 
     # Initialise SDR engine
     sdr = SDREngine(
@@ -162,14 +152,10 @@ async def lifespan(app: FastAPI):
     # Initialise DMR decoder
     decoder = DMRDecoder(audio_callback=on_audio, meta_callback=on_meta)
 
-    # Initialise STT decoder
-    stt = STTDecoder(transcript_callback=on_transcript)
-
     # Start hardware (blocking calls wrapped)
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, sdr.start)
     await decoder.start()
-    await stt.start()
 
     # Launch SDR acquisition loop
     task = asyncio.create_task(sdr_loop(), name="sdr-loop")
@@ -179,7 +165,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
-    await stt.stop()
     await decoder.stop()
     sdr.stop()
     logger.info("Shutdown complete")
@@ -256,22 +241,6 @@ async def ws_audio(websocket: WebSocket):
         logger.info("Audio client disconnected — total=%d", len(audio_clients))
 
 
-@app.websocket("/ws/stt")
-async def ws_stt(websocket: WebSocket):
-    await websocket.accept()
-    stt_clients.add(websocket)
-    logger.info("STT client connected — total=%d", len(stt_clients))
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        logger.exception("Unexpected error in STT WebSocket handler")
-    finally:
-        stt_clients.discard(websocket)
-        logger.info("STT client disconnected — total=%d", len(stt_clients))
-
 
 # ---------------------------------------------------------------------------
 # REST endpoints
@@ -287,7 +256,6 @@ async def api_status():
             "waterfall": len(waterfall_clients),
             "dmr":       len(dmr_clients),
             "audio":     len(audio_clients),
-            "stt":       len(stt_clients),
         },
     }
 

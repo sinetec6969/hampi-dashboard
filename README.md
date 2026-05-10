@@ -1,11 +1,9 @@
 # HamPi SDR Dashboard
 
-A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and transcribes speech to text — all in a browser.
+A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, and plays decoded audio — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.4-1_dsdfmehatesme
-
-> ⚠️ **Current state:** The dashboard is more broken than working, but the pieces are coming together.
+**Version:** 0.0.4-2_phoenixrising
 
 ---
 
@@ -31,13 +29,7 @@ A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built a
 
 ### Audio Playback
 - Decoded DMR voice streamed via WebSocket to Web Audio API
-- 48 kHz PCM, scheduled playback with underrun detection
-
-### Speech-to-Text
-- faster-whisper (tiny model, CPU int8) transcribes decoded DMR voice
-- Dual VAD: DMR VOICE frame trigger + energy-based fallback (RMS threshold)
-- Pre-roll buffer so no leading audio is lost
-- Transcript log with timeslot badge and timestamp, auto-scrolls
+- 8 kHz mono PCM (dsd-fme AMBE output), scheduled playback with underrun detection
 
 ---
 
@@ -48,11 +40,11 @@ A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built a
 
 ## Software Dependencies
 
-- Python 3.11+, `uvicorn`, `fastapi`, `numpy`, `scipy`, `faster-whisper`, `httpx`
+- Python 3.11+, `uvicorn`, `fastapi`, `numpy`, `scipy`, `httpx`
 - Node 18+, Vite, React 19
-- `dsd` (Digital Speech Decoder) — must be in `$PATH`
+- `dsd-fme` — must be in `$PATH`
 - `rtl_tcp`, `rtl_fm` from `rtl-sdr` package
-- `stdbuf` (GNU coreutils — for real-time DSD output, almost always pre-installed)
+- `stdbuf` (GNU coreutils — almost always pre-installed)
 
 ## Setup
 
@@ -100,14 +92,7 @@ Kernel DVB driver is holding the device. Run the USB unbind/bind commands above.
 echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/rtlsdr.conf
 ```
 
-### Backend hangs at "Loading Whisper model" forever
-faster-whisper was trying to phone home to Hugging Face over IPv6, which was timing out. Fixed in v0.0.3 (`local_files_only=True`). If the model hasn't been downloaded yet, run once with internet access:
-```python
-from faster_whisper import WhisperModel
-WhisperModel("tiny", device="cpu", compute_type="int8")
-```
-
-### Waterfall / DMR / STT WebSocket errors in browser console
+### Waterfall / DMR WebSocket errors in browser console
 The browser was loading a stale built frontend. Hard-refresh (`Ctrl+Shift+R`) or rebuild:
 ```bash
 cd frontend && npm run build
@@ -127,9 +112,6 @@ If `rtl_tcp` drops the connection, the SDR loop now automatically reconnects aft
 ### Tune button shows "Error"
 Usually means the SDR connection is broken. The backend now returns HTTP 503 with a message instead of a raw 500. Refresh the page — the SDR loop will have reconnected by then.
 
-### STT panel stays yellow (connecting)
-The WebSocket connects on page load; yellow briefly then goes green. If it stays yellow, the WebSocket upgrade is failing — check that the backend is up and the browser can reach port 8000 (or 5173 via the Vite proxy).
-
 ---
 
 ## Architecture
@@ -139,17 +121,22 @@ RTL-SDR dongle
     └── rtl_tcp (managed by backend, 127.0.0.1:1234)
             └── SDREngine (Python)
                     ├── FFT → ws/waterfall → browser canvas
-                    └── FM demodulate → PCM 48kHz
-                            └── DMRDecoder (dsd via stdbuf)
-                                    ├── stdout text lines → DMRFrame → ws/dmr → browser
-                                    ├── stdout binary PCM → ws/audio → Web Audio API
-                                    └── DMRFrame + PCM → STTDecoder (faster-whisper)
-                                                              └── transcript → ws/stt → browser
+                    └── FM demodulate → PCM 48kHz (thread executor)
+                            └── DMRDecoder (dsd-fme)
+                                    ├── stderr text → DMRFrame → ws/dmr → browser
+                                    │       └── src_id → /api/lookup → RadioID.net
+                                    └── WAV file (stereo 8kHz) → mix mono → ws/audio → Web Audio API
 ```
 
 ---
 
 ## Version History
+
+### 0.0.4-2_phoenixrising
+- **Fix: DMR contacts never populated** — `VC*` (Voice Continuation) frames were mapped to `UNKNOWN` instead of `VOICE` because `_map_ftype` stripped the trailing `*` before checking the map key `'VC*'`. The VLC header frame (correctly typed VOICE) has src_id=0 from `_clear_call`; all subsequent frames with the real src_id were `UNKNOWN`. Frontend filters on `frame_type === 'VOICE'` so no RadioID lookup ever fired and the Contacts panel stayed empty.
+- **Fix: Audio played at half speed** — dsd-fme `-w` outputs stereo WAV (TS1 left, TS2 right) at 8 kHz. The WAV reader was sending raw stereo bytes; the frontend and STT both treated them as mono, so 800 stereo frames (100 ms) were interpreted as 1600 mono samples (200 ms) — exactly 0.5× speed. WAV reader now mixes L+R to mono before broadcasting.
+- **Fix: Waterfall latency / choppiness** — `fm_demodulate` (64-tap FIR over 131072 samples) ran in the asyncio event loop, blocking it for ~30 ms every 55 ms cycle. Moved to thread executor; event loop now free to dispatch WebSocket frames promptly throughout the read+demodulate cycle.
+- **Removed STT** — faster-whisper speech-to-text removed for now; `stt.py` preserved on disk for future reimplementation.
 
 ### 0.0.4-1_dsdfmehatesme
 - **Switch decoder: dsd → dsd-fme** — original DSD never output LC header data (src/dst IDs) to any accessible stream; dsd-fme outputs structured metadata to stderr including talkgroup, DMR ID, talker alias, and color code
