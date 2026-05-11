@@ -1,9 +1,9 @@
 # HamPi SDR Dashboard
 
-A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, and plays decoded audio — all in a browser.
+A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and plots callers on a live world map — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.4-3_phoenixroseagain
+**Version:** 0.0.5_WORLDWIDEBBY
 
 ---
 
@@ -31,6 +31,12 @@ A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built a
 - Decoded DMR voice streamed via WebSocket to Web Audio API
 - 8 kHz mono PCM (dsd-fme AMBE output), scheduled playback with underrun detection
 
+### Live Caller Map
+- Mercator world map (CartoDB Dark Matter tiles — no API key required)
+- Each heard DMR ID is geocoded via Nominatim OSM and pinned with a glowing green dot
+- Click any pin for callsign, name, city/state, DMR ID, timeslot, talkgroup, and QRZ link
+- Geocoding cached permanently in memory; RadioID lookups cached 1 hour
+
 ---
 
 ## Hardware Requirements
@@ -41,7 +47,7 @@ A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built a
 ## Software Dependencies
 
 - Python 3.11+, `uvicorn`, `fastapi`, `numpy`, `scipy`, `httpx`
-- Node 18+, Vite, React 19
+- Node 18+, Vite, React 19, `leaflet`, `react-leaflet`
 - `dsd-fme` — must be in `$PATH`
 - `rtl_tcp`, `rtl_fm` from `rtl-sdr` package
 - `stdbuf` (GNU coreutils — almost always pre-installed)
@@ -120,17 +126,23 @@ Usually means the SDR connection is broken. The backend now returns HTTP 503 wit
 RTL-SDR dongle
     └── rtl_tcp (managed by backend, 127.0.0.1:1234)
             └── SDREngine (Python)
-                    ├── FFT → ws/waterfall → browser canvas
-                    └── FM demodulate → PCM 48kHz (thread executor)
+                    ├── FFT ×4 → ws/waterfall → browser canvas
+                    └── FM demodulate → PCM 48kHz (thread executor, pipelined)
                             └── DMRDecoder (dsd-fme)
                                     ├── stderr text → DMRFrame → ws/dmr → browser
-                                    │       └── src_id → /api/lookup → RadioID.net
-                                    └── WAV file (stereo 8kHz) → mix mono → ws/audio → Web Audio API
+                                    │       └── src_id → /api/lookup → RadioID.net + Nominatim
+                                    │                                    └── lat/lon → MapPanel pins
+                                    └── WAV file (stereo 8kHz) → mix mono → pace → ws/audio → Web Audio API
 ```
 
 ---
 
 ## Version History
+
+### 0.0.5_WORLDWIDEBBY
+- **Live caller map** — Mercator world map using CartoDB Dark Matter tiles (free, no API key, dark-themed) rendered with react-leaflet. Each unique DMR ID heard is geocoded via Nominatim OSM and plotted as a glowing green pin. Clicking a pin shows callsign, name, city/state, DMR ID, timeslot, talkgroup, and a direct QRZ link.
+- **Geocoding pipeline** — `/api/lookup` extended to call Nominatim after RadioID.net; resolves city+state+country to lat/lon. Results cached permanently in `_geo_cache` (city locations don't change), independent of the 1-hour RadioID TTL. Frontend only plots pins when lat/lon are present; contacts without a resolvable location appear in the Contacts panel only.
+- **Map layout** — map panel occupies all remaining vertical space below the waterfall and control panels via `flex:1`, scaling naturally with window height.
 
 ### 0.0.4-3_phoenixroseagain
 - **Fix: Waterfall extremely slow** — `lfilter` (direct FIR convolution) at 2.4 MHz sample rate was running at 2.4× slower than real-time on the Pi, causing a growing socket buffer backlog and ~5 fps waterfall. Replaced with `oaconvolve` (overlap-add FFT convolution), which is 3× faster and keeps up with the data rate. Added overlap-save state (`_lpf_tail`) so the filter has correct history at every chunk boundary — no startup transient between chunks.
