@@ -7,6 +7,7 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
 .main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .waterfall-wrap { flex: 0 0 220px; height: 220px; position: relative; overflow: hidden; }
 .bottom-row { display: flex; height: 220px; flex-shrink: 0; border-top: 1px solid #333; }
+.map-wrap { flex: 1; min-height: 0; border-top: 1px solid #333; overflow: hidden; }
 .panel { background: #111; border-right: 1px solid #333; padding: 8px; overflow: hidden; }
 .panel-title { font-size: 0.75rem; color: #888; text-transform: uppercase; margin-bottom: 6px; }
 .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; margin-right: 4px; }

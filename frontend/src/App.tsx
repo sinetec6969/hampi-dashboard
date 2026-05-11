@@ -5,6 +5,7 @@ import DMRPanel from './components/DMRPanel'
 import AudioPlayer from './components/AudioPlayer'
 import Controls from './components/Controls'
 import ContactsPanel from './components/ContactsPanel'
+import MapPanel from './components/MapPanel'
 
 export default function App() {
   const [freq, setFreq] = useState(438800000)
@@ -25,7 +26,10 @@ export default function App() {
         <div className="bottom-row">
           <DMRPanel/>
           <ContactsPanel/>
-<AudioPlayer/>
+          <AudioPlayer/>
+        </div>
+        <div className="map-wrap">
+          <MapPanel/>
         </div>
       </div>
     </>

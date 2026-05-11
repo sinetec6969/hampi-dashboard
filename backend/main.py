@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 _lookup_cache: dict[int, tuple[float, dict]] = {}
 LOOKUP_TTL = 3600.0   # cache entries for 1 hour
 
+# Geocoding cache: "city|state" → (lat, lon) | None — permanent, cities don't move
+_geo_cache: dict[str, tuple[float, float] | None] = {}
+
 INITIAL_FREQ:   int   = int(os.getenv("SDR_FREQ",        "438800000"))
 INITIAL_GAIN:   float = float(os.getenv("SDR_GAIN",      "49.6"))
 SAMPLE_RATE:    int   = int(os.getenv("SDR_SAMPLE_RATE", "2400000"))
@@ -303,9 +306,35 @@ async def api_tune(freq: Optional[int] = None, gain: Optional[float] = None):
     return {"status": "ok", "changed": changed}
 
 
+async def _geocode(city: str, state: str, country: str) -> tuple[float, float] | None:
+    """Resolve city+state to lat/lon via Nominatim OSM. Cached permanently."""
+    if not city:
+        return None
+    key = f"{city}|{state}|{country}".lower()
+    if key in _geo_cache:
+        return _geo_cache[key]
+    q = ", ".join(part for part in [city, state, country] if part)
+    try:
+        async with httpx.AsyncClient(
+            timeout=5.0,
+            headers={"User-Agent": "HamPiSDR/0.0.4 (github.com/sinetec6969/hampi-dashboard)"},
+        ) as client:
+            r    = await client.get("https://nominatim.openstreetmap.org/search",
+                                    params={"q": q, "format": "json", "limit": 1})
+            data = r.json()
+        if data:
+            coords: tuple[float, float] = (float(data[0]["lat"]), float(data[0]["lon"]))
+            _geo_cache[key] = coords
+            return coords
+    except Exception as exc:
+        logger.debug("Geocode failed for %r: %s", q, exc)
+    _geo_cache[key] = None
+    return None
+
+
 @app.get("/api/lookup/{dmr_id}")
 async def api_lookup(dmr_id: int):
-    """Look up a DMR ID on RadioID.net and return callsign + name (cached 1 h)."""
+    """Look up a DMR ID on RadioID.net; includes lat/lon from Nominatim geocoding."""
     now = time.monotonic()
     if dmr_id in _lookup_cache:
         expires, cached = _lookup_cache[dmr_id]
@@ -320,7 +349,8 @@ async def api_lookup(dmr_id: int):
             data = r.json()
     except Exception as exc:
         logger.warning("RadioID lookup failed for %d: %s", dmr_id, exc)
-        return {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": ""}
+        return {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": "",
+                "lat": None, "lon": None}
 
     results = data.get("results", [])
     if results:
@@ -331,9 +361,15 @@ async def api_lookup(dmr_id: int):
             "name":     f"{u.get('fname', '')} {u.get('surname', '')}".strip(),
             "city":     u.get("city", ""),
             "state":    u.get("state", ""),
+            "country":  u.get("country", ""),
         }
     else:
-        result = {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": ""}
+        result = {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": "",
+                  "country": "", "lat": None, "lon": None}
+
+    coords = await _geocode(result["city"], result["state"], result.get("country", ""))
+    result["lat"] = coords[0] if coords else None
+    result["lon"] = coords[1] if coords else None
 
     _lookup_cache[dmr_id] = (now + LOOKUP_TTL, result)
     return result
