@@ -10,7 +10,7 @@ import time
 from typing import Optional
 
 import numpy as np
-from scipy.signal import firwin, oaconvolve
+from scipy.signal import firwin, lfilter, lfilter_zi
 
 logger = logging.getLogger(__name__)
 
@@ -49,22 +49,15 @@ class SDREngine:
 
         # FM demodulation state
         self._prev_sample: complex = 0 + 0j
-
-        # Build decimation filter once (2.4 MHz -> 48 kHz, ratio=50)
-        # Cutoff 6 kHz: DMR uses 12.5 kHz channel spacing with ±1944 Hz deviation;
-        # 6 kHz passes the full DMR signal while rejecting adjacent channel noise.
         self._decim_ratio = self.sample_rate // 48_000  # 50
-        self._fm_lpf = firwin(
-            numtaps=64,
-            cutoff=6_000,
-            fs=self.sample_rate,
-            window="hamming",
-        )
 
-        # Overlap-save state: last (numtaps-1) samples from the previous chunk.
-        # Prepended to each new chunk so the FIR filter has correct past history
-        # at every chunk boundary (no startup transient between chunks).
-        self._lpf_tail = np.zeros(len(self._fm_lpf) - 1, dtype=np.complex64)
+        # Audio LPF applied AFTER decimation at 48 kHz.
+        # At 48 kHz a 64-tap Hamming FIR gives -72 dB at 12.5 kHz (adjacent DMR
+        # channel), which is the correct place to filter.  The same filter applied
+        # at 2.4 MHz only gives -0.7 dB at 12.5 kHz — completely ineffective.
+        self._audio_lpf    = firwin(numtaps=64, cutoff=6_000, fs=48_000,
+                                    window="hamming").astype(np.float32)
+        self._audio_lpf_zi = np.zeros(len(self._audio_lpf) - 1, dtype=np.float32)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -217,9 +210,13 @@ class SDREngine:
 
         Steps:
           1. Frequency-shift to move target_freq to baseband.
-          2. Low-pass filter (15 kHz cutoff, 64-tap FIR).
-          3. Decimate from sample_rate (2.4 MHz) to 48 kHz.
-          4. FM discriminator via conjugate product.
+          1. Frequency shift so target_freq lands at DC (skipped if already there).
+          2. Decimate IQ from 2.4 MHz to 48 kHz (factor 50, no pre-filter needed —
+             adjacent channels land at ≥12.5 kHz in the 48 kHz domain where the
+             audio LPF rejects them at −72 dB).
+          3. FM discriminator: instantaneous phase via conjugate product.
+          4. Low-pass filter at 48 kHz — 64-tap Hamming FIR, 6 kHz cutoff.
+             Stateful (lfilter + zi) so there is no transient at chunk boundaries.
           5. Scale and clip to int16.
 
         Args:
@@ -238,28 +235,26 @@ class SDREngine:
             shift = np.exp(-2j * np.pi * freq_offset * t).astype(np.complex64)
             iq = iq * shift
 
-        # 2. Low-pass filter via overlap-add (oaconvolve).
-        # Prepend the saved tail from the previous chunk so the filter has correct
-        # history at the boundary — no startup transient between chunks.
-        M = len(self._fm_lpf)
-        padded   = np.concatenate([self._lpf_tail, iq])
-        full_out = oaconvolve(padded, self._fm_lpf, mode="full")
-        filtered = full_out[M - 1 : M - 1 + len(iq)].astype(np.complex64)
-        self._lpf_tail = iq[-(M - 1):]
+        # 2. Decimate IQ to 48 kHz — simple stride, no pre-filter.
+        # Adjacent DMR channels (±12.5 kHz) survive decimation at 12.5 kHz in the
+        # 48 kHz domain and are removed by the audio LPF in step 4.
+        decimated = iq[:: self._decim_ratio]
 
-        # 3. Decimate
-        decimated = filtered[:: self._decim_ratio]
-
-        # 4. FM discriminator: angle of x[n] * conj(x[n-1])
+        # 3. FM discriminator: angle(x[n] · conj(x[n-1])) = instantaneous freq
         prev = np.empty_like(decimated)
-        prev[0] = self._prev_sample
+        prev[0]  = self._prev_sample
         prev[1:] = decimated[:-1]
         self._prev_sample = decimated[-1]
+        demod = np.angle(decimated * np.conj(prev)).astype(np.float32)
 
-        product = decimated * np.conj(prev)
-        demod = np.angle(product).astype(np.float32)
+        # 4. Low-pass filter at 48 kHz: channel selection and noise rejection.
+        # lfilter with zi maintains state across chunks (no per-chunk transient).
+        demod, self._audio_lpf_zi = lfilter(
+            self._audio_lpf, [1.0], demod, zi=self._audio_lpf_zi
+        )
 
         # 5. Scale to int16
+        demod = demod.astype(np.float32)
         demod *= 32767.0 / np.pi
         pcm = np.clip(demod, -32768, 32767).astype(np.int16)
         return pcm.tobytes()

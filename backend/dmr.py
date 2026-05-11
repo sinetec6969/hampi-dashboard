@@ -359,48 +359,68 @@ class DMRDecoder:
         bits     = int.from_bytes(header[34:36], "little")
         logger.info("Audio WAV ready — sample_rate=%d Hz, channels=%d, bits=%d", sr, channels, bits)
 
-        # Pacing state: track audio-time sent vs wall-clock so we never burst
-        # more than PACE_AHEAD seconds of audio to the browser at once.
-        # Reset on every gap (empty read) so long silences don't corrupt the ref.
-        PACE_AHEAD = 0.10   # target: stay at most 100 ms ahead of real-time
-        _pace_t0:    float = 0.0
-        _pace_bytes: int   = 0
-        mono_rate = sr * 2  # bytes per second of mono int16 at sample rate sr
+        # Pacing: track audio-time sent vs wall-clock; reset on silence gap.
+        PACE_AHEAD  = 0.10   # max seconds ahead of real-time before throttling
+        GAP_RESET_S = 0.30   # silence longer than this resets the pacing reference
+        _pace_t0:      float = 0.0
+        _pace_bytes:   int   = 0
+        _last_data_t:  float = 0.0
+        mono_rate = sr * 2   # bytes/sec for mono int16 at sample rate sr
+
+        # Raw stereo byte buffer — accumulate here, only emit complete AUDIO_CHUNK
+        # blocks.  Partial reads from the WAV file (dsd-fme writes in DMR frame
+        # bursts of 640 bytes) would otherwise produce irregular chunk sizes and
+        # confuse the browser's Web Audio scheduler.
+        _buf = bytearray()
 
         _total = 0
         try:
             while True:
-                chunk = fh.read(AUDIO_CHUNK)
-                if not chunk:
-                    # Gap — reset pacing so next burst starts with a clean reference
-                    _pace_t0    = 0.0
-                    _pace_bytes = 0
+                data = fh.read(AUDIO_CHUNK * 2)  # drain up to 2 chunks at once
+                now  = time.monotonic()
+
+                if data:
+                    _last_data_t = now
+                    _buf.extend(data)
+
+                    # Emit all complete AUDIO_CHUNK-sized blocks from the buffer
+                    while len(_buf) >= AUDIO_CHUNK:
+                        raw = bytes(_buf[:AUDIO_CHUNK])
+                        del _buf[:AUDIO_CHUNK]
+
+                        # Mix stereo → mono
+                        if channels == 2 and bits == 16:
+                            stereo = np.frombuffer(raw, dtype=np.int16).reshape(-1, 2)
+                            mixed  = stereo.astype(np.int32).sum(axis=1) // 2
+                            chunk  = mixed.astype(np.int16).tobytes()
+                        else:
+                            chunk = raw
+
+                        # Pace: sleep if we're getting too far ahead of real-time
+                        if _pace_t0 == 0.0:
+                            _pace_t0 = now
+                        _pace_bytes += len(chunk)
+                        audio_s  = _pace_bytes / mono_rate
+                        wall_s   = time.monotonic() - _pace_t0
+                        ahead_s  = audio_s - wall_s
+                        if ahead_s > PACE_AHEAD:
+                            await asyncio.sleep(ahead_s - 0.02)
+
+                        _total += len(chunk)
+                        try:
+                            await self._audio_cb(chunk)
+                        except Exception:
+                            logger.exception("audio_callback raised an exception")
+
+                else:
+                    # No new WAV data
+                    if _last_data_t > 0 and now - _last_data_t > GAP_RESET_S:
+                        # Silence gap — discard any partial buffer and reset pacing
+                        _buf.clear()
+                        _pace_t0     = 0.0
+                        _pace_bytes  = 0
+                        _last_data_t = 0.0
                     await asyncio.sleep(AUDIO_POLL_S)
-                    continue
-
-                # dsd-fme outputs stereo: TS1 on left, TS2 on right.
-                # Mix down to mono so playback and STT see the correct sample rate.
-                if channels == 2 and bits == 16:
-                    stereo = np.frombuffer(chunk, dtype=np.int16).reshape(-1, 2)
-                    mixed  = stereo.astype(np.int32).sum(axis=1) // 2
-                    chunk  = mixed.astype(np.int16).tobytes()
-
-                # Pace delivery: if we're ahead of wall-clock by more than PACE_AHEAD,
-                # sleep until we're back within a 20 ms margin.
-                if _pace_t0 == 0.0:
-                    _pace_t0 = time.monotonic()
-                _pace_bytes += len(chunk)
-                audio_s = _pace_bytes / mono_rate
-                wall_s  = time.monotonic() - _pace_t0
-                ahead_s = audio_s - wall_s
-                if ahead_s > PACE_AHEAD:
-                    await asyncio.sleep(ahead_s - 0.02)
-
-                _total += len(chunk)
-                try:
-                    await self._audio_cb(chunk)
-                except Exception:
-                    logger.exception("audio_callback raised an exception")
         except asyncio.CancelledError:
             pass
         except Exception:

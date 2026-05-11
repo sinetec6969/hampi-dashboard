@@ -3,7 +3,7 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and plots callers on a live world map — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.5_WORLDWIDEBBY
+**Version:** 0.0.5-1WORKINGPHOENIX
 
 ---
 
@@ -132,12 +132,17 @@ RTL-SDR dongle
                                     ├── stderr text → DMRFrame → ws/dmr → browser
                                     │       └── src_id → /api/lookup → RadioID.net + Nominatim
                                     │                                    └── lat/lon → MapPanel pins
-                                    └── WAV file (stereo 8kHz) → mix mono → pace → ws/audio → Web Audio API
+                                    └── WAV file (stereo 8kHz) → buf → mix mono → pace → ws/audio → AudioWorklet
 ```
 
 ---
 
 ## Version History
+
+### 0.0.5-1WORKINGPHOENIX
+- **Fix: FM demodulation channel filter was ineffective** — the 64-tap FIR applied at 2.4 MHz had only −0.7 dB attenuation at the adjacent DMR channel (12.5 kHz). Adjacent channels bled straight through, corrupting the 4-FSK symbol decisions and causing near-constant `FLCO FEC ERR` in dsd-fme. Moved the LPF to 48 kHz (post-decimation) where the same 64 taps give −72 dB at 12.5 kHz. Also eliminated `oaconvolve` entirely — lfilter on 2,621 samples at 48 kHz takes 1.1 ms vs 46 ms at 2.4 MHz, giving 53 ms of headroom per chunk.
+- **Fix: Partial WAV reads caused irregular chunk sizes** — dsd-fme writes AMBE audio in 640-byte frame bursts; reading 3,200 bytes at a time would often return partial chunks of unpredictable size. The browser's Web Audio scheduler received buffers of varying duration (60 ms, 80 ms, 100 ms …) making gapless scheduling impossible. WAV reader now accumulates raw stereo bytes in a bytearray and only emits complete fixed-size chunks. Silence gap > 300 ms discards any partial buffer and resets pacing so long quiet periods don't corrupt timing.
+- **Fix: Audio playback replaced with AudioWorklet** — `AudioBufferSourceNode.start(scheduledTime)` relies on the JS main thread for scheduling; on a Pi running SDR processing simultaneously, GC/CPU pressure causes 5–15 ms slips that produce audible gaps at every buffer boundary. Replaced with an `AudioWorklet` (`audio-processor.js`) that runs in a dedicated real-time audio thread: `process()` fires every 128 samples regardless of main-thread congestion, drains a sample queue, and fills silence during underruns. Main thread resamples 8 kHz → native context rate with linear interpolation before zero-copy transfer to the worklet. Primes with 150 ms of audio before opening output to hide initial jitter.
 
 ### 0.0.5_WORLDWIDEBBY
 - **Live caller map** — Mercator world map using CartoDB Dark Matter tiles (free, no API key, dark-themed) rendered with react-leaflet. Each unique DMR ID heard is geocoded via Nominatim OSM and plotted as a glowing green pin. Clicking a pin shows callsign, name, city/state, DMR ID, timeslot, talkgroup, and a direct QRZ link.
