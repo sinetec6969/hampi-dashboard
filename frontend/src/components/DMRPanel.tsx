@@ -51,17 +51,26 @@ export default function DMRPanel() {
         if (f.frame_type === 'VOICE') {
           setActiveTs(f.timeslot)
           if (f.color_code) setActiveCC(f.color_code)
-          if (f.dst_id) setActiveDst(f.dst_id)
-          if (f.alias) setActiveAlias(f.alias)
-          if (f.src_id && f.src_id !== lastSrcRef.current) {
-            lastSrcRef.current = f.src_id
-            setActiveSrc(f.src_id)
-            setLookup(null)
-            if (!f.alias) {
-              fetch(`/api/lookup/${f.src_id}`)
-                .then(r => r.json())
-                .then((d: LookupResult) => setLookup(d))
-                .catch(() => {})
+
+          if (f.src_id === 0) {
+            // VLC header — backend just called _clear_call for a new transmission.
+            // Reset lastSrcRef so the next VC* frame (even from the same caller)
+            // is treated as a new call and updates the display.
+            lastSrcRef.current = 0
+            setActiveAlias('')   // don't bleed previous caller's alias
+          } else {
+            if (f.dst_id) setActiveDst(f.dst_id)
+            if (f.alias)  setActiveAlias(f.alias)
+            if (f.src_id !== lastSrcRef.current) {
+              lastSrcRef.current = f.src_id
+              setActiveSrc(f.src_id)
+              setLookup(null)
+              if (!f.alias) {
+                fetch(`/api/lookup/${f.src_id}`)
+                  .then(r => r.json())
+                  .then((d: LookupResult) => setLookup(d))
+                  .catch(() => {})
+              }
             }
           }
         }
