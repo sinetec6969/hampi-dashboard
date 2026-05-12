@@ -3,7 +3,7 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and plots callers on a live world map — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.5-1WORKINGPHOENIX
+**Version:** 0.0.5-2FIXEDPHOENIX
 
 ---
 
@@ -138,6 +138,9 @@ RTL-SDR dongle
 ---
 
 ## Version History
+
+### 0.0.5-2FIXEDPHOENIX
+- **Fix: DMRPanel active call freezes after ~5 minutes** — `lastSrcRef` was set on first contact and never reset between transmissions. When the same caller keyed up again: the VLC header frame has `src_id=0` (backend calls `_clear_call`), which is falsy, so the `if (f.src_id && ...)` guard short-circuited and `lastSrcRef` stayed at the old value. Subsequent VC\* frames with the same src_id then failed the `!== lastSrcRef` check, so `setActiveSrc`, `setLookup`, and the RadioID fetch never fired. Contacts and Map were unaffected because they update `lastSeen` on every VOICE frame without a src_id guard. Fix: on VLC frame (`src_id === 0`) reset `lastSrcRef` to 0 and clear `activeAlias` so the next VC\* frame — even from a repeat caller — is always treated as a new call.
 
 ### 0.0.5-1WORKINGPHOENIX
 - **Fix: FM demodulation channel filter was ineffective** — the 64-tap FIR applied at 2.4 MHz had only −0.7 dB attenuation at the adjacent DMR channel (12.5 kHz). Adjacent channels bled straight through, corrupting the 4-FSK symbol decisions and causing near-constant `FLCO FEC ERR` in dsd-fme. Moved the LPF to 48 kHz (post-decimation) where the same 64 taps give −72 dB at 12.5 kHz. Also eliminated `oaconvolve` entirely — lfilter on 2,621 samples at 48 kHz takes 1.1 ms vs 46 ms at 2.4 MHz, giving 53 ms of headroom per chunk.
