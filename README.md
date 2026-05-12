@@ -3,7 +3,7 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and plots callers on a live world map — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.5-2FIXEDPHOENIX
+**Version:** 0.0.6_thedarkphoenixrises
 
 ---
 
@@ -138,6 +138,9 @@ RTL-SDR dongle
 ---
 
 ## Version History
+
+### 0.0.6_thedarkphoenixrises
+- **Fix: Audio completely silent after AudioWorklet introduction** — `AudioWorklet.addModule()` is blocked on plain HTTP from non-`localhost` origins (browser treats it as an insecure context). The rejection was synchronous, React 18 batched `'connecting'` → `'stopped'` into a single render cycle, and the Start button appeared to do nothing. Fixed with a two-path player: checks `window.isSecureContext` first; on HTTPS/localhost uses the AudioWorklet (dedicated real-time audio thread, gapless, linear-interp resampled); on plain HTTP falls back to scheduled `AudioBufferSourceNode` which works on any origin. The active path (`AudioWorklet` or `scheduled`) is shown in the panel. Added `ctx.resume()` on both paths and visible error display so failures are never silent.
 
 ### 0.0.5-2FIXEDPHOENIX
 - **Fix: DMRPanel active call freezes after ~5 minutes** — `lastSrcRef` was set on first contact and never reset between transmissions. When the same caller keyed up again: the VLC header frame has `src_id=0` (backend calls `_clear_call`), which is falsy, so the `if (f.src_id && ...)` guard short-circuited and `lastSrcRef` stayed at the old value. Subsequent VC\* frames with the same src_id then failed the `!== lastSrcRef` check, so `setActiveSrc`, `setLookup`, and the RadioID fetch never fired. Contacts and Map were unaffected because they update `lastSeen` on every VOICE frame without a src_id guard. Fix: on VLC frame (`src_id === 0`) reset `lastSrcRef` to 0 and clear `activeAlias` so the next VC\* frame — even from a repeat caller — is always treated as a new call.
