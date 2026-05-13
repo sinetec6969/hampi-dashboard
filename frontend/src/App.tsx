@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 import Waterfall from './components/Waterfall'
 import DMRPanel from './components/DMRPanel'
@@ -6,30 +6,55 @@ import AudioPlayer from './components/AudioPlayer'
 import Controls from './components/Controls'
 import ContactsPanel from './components/ContactsPanel'
 import MapPanel from './components/MapPanel'
+import MemoryChannels from './components/MemoryChannels'
 
 export default function App() {
   const [freq, setFreq] = useState(438800000)
+  const [gain, setGain] = useState(49.6)
+  const [tuneMsg, setTuneMsg] = useState('')
 
-  const handleTune = useCallback((f: number, _g: number) => { setFreq(f) }, [])
+  useEffect(() => {
+    fetch('/api/status').then(r => r.json()).then(d => {
+      setFreq(d.freq)
+      setGain(d.gain)
+    })
+  }, [])
+
+  async function tuneTo(f: number, g: number) {
+    const r = await fetch(`/api/tune?freq=${f}&gain=${g}`, { method: 'POST' })
+    if (r.ok) {
+      setFreq(f)
+      setGain(g)
+      setTuneMsg('Tuned ✓')
+      setTimeout(() => setTuneMsg(''), 2000)
+    } else {
+      setTuneMsg('Error')
+    }
+  }
 
   return (
     <>
       <div className="header">
         <span className="header-title">🛰 HamPi SDR</span>
-        <span className="header-freq">{(freq/1e6).toFixed(4)} MHz</span>
-        <Controls onTune={handleTune}/>
+        <span className="header-freq">{(freq / 1e6).toFixed(4)} MHz</span>
+        <Controls
+          freq={freq} gain={gain}
+          onFreqChange={setFreq} onGainChange={setGain}
+          onTune={tuneTo} msg={tuneMsg}
+        />
       </div>
+      <MemoryChannels currentFreq={freq} currentGain={gain} onRecall={tuneTo} />
       <div className="main">
         <div className="waterfall-wrap">
-          <Waterfall centerFreqHz={freq}/>
+          <Waterfall centerFreqHz={freq} onClickTune={f => tuneTo(f, gain)} />
         </div>
         <div className="bottom-row">
-          <DMRPanel/>
-          <ContactsPanel/>
-          <AudioPlayer/>
+          <DMRPanel />
+          <ContactsPanel />
+          <AudioPlayer />
         </div>
         <div className="map-wrap">
-          <MapPanel/>
+          <MapPanel />
         </div>
       </div>
     </>

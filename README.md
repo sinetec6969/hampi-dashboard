@@ -3,7 +3,7 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and plots callers on a live world map — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.6_thedarkphoenixrises
+**Version:** 0.0.6_th3d3vi1
 
 ---
 
@@ -14,11 +14,13 @@ A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built a
 - Colour-mapped dBFS scale (blue → cyan → green → yellow → red)
 - Frequency axis auto-labelled from centre frequency
 - WebSocket-driven, updates as fast as the SDR loop runs
+- **Click or tap to tune** — crosshair cursor with live frequency label on hover; touch tunes immediately
 
 ### Tune Control
 - Frequency input (Hz) and gain slider (0–50 dB)
 - POST to `/api/tune` — tunes the RTL-SDR in real time without restarting
 - Status bar shows connected client counts per stream
+- **Memory channels** — persistent channel bank (localStorage); save any frequency/gain with a name, recall with one tap
 
 ### DMR Decode
 - DSD (Digital Speech Decoder) decodes DMR/MOTOTRBO frames
@@ -139,6 +141,11 @@ RTL-SDR dongle
 
 ## Version History
 
+### 0.0.6_th3d3vi1
+- **Waterfall click/touch-to-tune** — clicking or tapping anywhere on the waterfall canvas immediately tunes to that frequency. Mouse hover draws a green vertical crosshair with a floating frequency label (flips side at centre so it never clips the edge); touch fires the tune directly. Frequency calculated as `centerFreq + (x/width − 0.5) × 2.4 MHz`, rounded to the nearest Hz, and POSTed to `/api/tune`.
+- **Memory channels** — a persistent channel bank bar sits between the header and the waterfall. Click `+ Save` to name and store the current frequency and gain; clicking any channel pill instantly recalls and tunes to it; `×` deletes. Channels are saved to `localStorage` (`hampi-memory-channels`) so they survive page reloads and browser restarts.
+- **State lifted to App** — `freq` and `gain` now live in `App.tsx` with a single `tuneTo(f, g)` function as the sole path to the tune API. Controls, MemoryChannels, and the waterfall click handler all call through it, so the header frequency display, Controls inputs, and memory bar are always in sync regardless of which control initiated the tune.
+
 ### 0.0.6_thedarkphoenixrises
 - **Fix: Audio completely silent after AudioWorklet introduction** — `AudioWorklet.addModule()` is blocked on plain HTTP from non-`localhost` origins (browser treats it as an insecure context). The rejection was synchronous, React 18 batched `'connecting'` → `'stopped'` into a single render cycle, and the Start button appeared to do nothing. Fixed with a two-path player: checks `window.isSecureContext` first; on HTTPS/localhost uses the AudioWorklet (dedicated real-time audio thread, gapless, linear-interp resampled); on plain HTTP falls back to scheduled `AudioBufferSourceNode` which works on any origin. The active path (`AudioWorklet` or `scheduled`) is shown in the panel. Added `ctx.resume()` on both paths and visible error display so failures are never silent.
 
@@ -215,7 +222,7 @@ RTL-SDR dongle
 - [ ] NXDN / D-STAR decode modes
 - [ ] Trunked DMR system support (control channel parsing, follow traffic)
 - [ ] Signal strength meter and SNR display on the waterfall
-- [ ] Click-to-tune on the waterfall canvas
+- [x] Click-to-tune on the waterfall canvas
 
 ### Audio
 - [ ] Audio recording — save decoded voice to timestamped WAV files per call
