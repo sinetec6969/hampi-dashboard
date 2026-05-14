@@ -74,11 +74,6 @@ class PCMProcessor extends AudioWorkletProcessor {
     // Silence for underrun frames
     for (let i = filled; i < need; i++) out[i] = 0
 
-    // Re-prime if we fully drained (next transmission needs buffering)
-    if (this._chunks.length === 0 && filled < need) {
-      this._primed = false
-    }
-
     return true
   }
 }

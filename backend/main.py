@@ -51,6 +51,9 @@ CHUNK_SIZE:     int   = int(os.getenv("SDR_CHUNK_SIZE",  "131072"))
 FFT_PER_CHUNK:  int   = 4   # waterfall lines emitted per IQ read
 N_FFT:          int   = 1024
 FRONTEND_DIST:  str   = os.getenv("FRONTEND_DIST", "../frontend/dist")
+HISTORY_FILE:   str   = os.getenv("HISTORY_FILE",
+                                   os.path.join(os.path.dirname(__file__), "..", "call_history.json"))
+MAX_HISTORY:    int   = 200
 
 # ---------------------------------------------------------------------------
 # Shared state
@@ -61,6 +64,24 @@ decoder: DMRDecoder
 waterfall_clients: Set[WebSocket] = set()
 dmr_clients:       Set[WebSocket] = set()
 audio_clients:     Set[WebSocket] = set()
+
+call_history: list[dict] = []
+
+
+def _load_history() -> list[dict]:
+    try:
+        with open(HISTORY_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _save_history() -> None:
+    try:
+        with open(HISTORY_FILE, "w") as f:
+            json.dump(call_history, f)
+    except Exception:
+        logger.exception("Failed to save call history")
 
 # ---------------------------------------------------------------------------
 # Broadcast helpers
@@ -105,6 +126,27 @@ async def on_audio(pcm: bytes) -> None:
 
 async def on_meta(frame_dict: dict) -> None:
     await broadcast_json(dmr_clients, frame_dict)
+
+
+async def on_call_end(record: dict) -> None:
+    src_id = record.get("src_id", 0)
+    if src_id:
+        try:
+            info = await _lookup_dmr_id(src_id)
+            record["callsign"] = info.get("callsign", "")
+            record["name"]     = info.get("name", "")
+            record["city"]     = info.get("city", "")
+            record["state"]    = info.get("state", "")
+        except Exception:
+            record["callsign"] = record["name"] = record["city"] = record["state"] = ""
+    else:
+        record["callsign"] = record["name"] = record["city"] = record["state"] = ""
+    call_history.insert(0, record)
+    if len(call_history) > MAX_HISTORY:
+        del call_history[MAX_HISTORY:]
+    _save_history()
+    await broadcast_json(dmr_clients, {"type": "call_record", **record})
+    logger.info("Call logged: src=%s tg=%s dur=%.1fs", record["src_id"], record["dst_id"], record["duration_s"])
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +215,10 @@ async def sdr_loop() -> None:
 async def lifespan(app: FastAPI):
     global sdr, decoder
 
+    # Load persisted call history
+    call_history.extend(_load_history())
+    logger.info("Call history loaded: %d entries", len(call_history))
+
     # Initialise SDR engine
     sdr = SDREngine(
         freq=INITIAL_FREQ,
@@ -181,7 +227,11 @@ async def lifespan(app: FastAPI):
     )
 
     # Initialise DMR decoder
-    decoder = DMRDecoder(audio_callback=on_audio, meta_callback=on_meta)
+    decoder = DMRDecoder(
+        audio_callback=on_audio,
+        meta_callback=on_meta,
+        call_end_callback=on_call_end,
+    )
 
     # Start hardware (blocking calls wrapped)
     loop = asyncio.get_running_loop()
@@ -332,9 +382,12 @@ async def _geocode(city: str, state: str, country: str) -> tuple[float, float] |
     return None
 
 
-@app.get("/api/lookup/{dmr_id}")
-async def api_lookup(dmr_id: int):
-    """Look up a DMR ID on RadioID.net; includes lat/lon from Nominatim geocoding."""
+@app.get("/api/calls")
+async def api_calls():
+    return call_history
+
+
+async def _lookup_dmr_id(dmr_id: int) -> dict:
     now = time.monotonic()
     if dmr_id in _lookup_cache:
         expires, cached = _lookup_cache[dmr_id]
@@ -373,6 +426,12 @@ async def api_lookup(dmr_id: int):
 
     _lookup_cache[dmr_id] = (now + LOOKUP_TTL, result)
     return result
+
+
+@app.get("/api/lookup/{dmr_id}")
+async def api_lookup(dmr_id: int):
+    """Look up a DMR ID on RadioID.net; includes lat/lon from Nominatim geocoding."""
+    return await _lookup_dmr_id(dmr_id)
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, asdict
+from datetime import datetime
 from typing import Callable, Awaitable, Optional
 
 import numpy as np
@@ -82,8 +83,9 @@ def _map_ftype(raw: str) -> str:
 
 # -------------------------------------------------------------------------
 
-AudioCallback = Callable[[bytes], Awaitable[None]]
-MetaCallback  = Callable[[dict], Awaitable[None]]
+AudioCallback    = Callable[[bytes], Awaitable[None]]
+MetaCallback     = Callable[[dict], Awaitable[None]]
+CallEndCallback  = Callable[[dict], Awaitable[None]]
 
 
 @dataclass
@@ -108,12 +110,14 @@ class DMRDecoder:
 
     DSD_ARGS = ["dsd-fme", "-i", "-", "-fs", "-w", AUDIO_WAV]
 
-    def __init__(self, audio_callback: AudioCallback, meta_callback: MetaCallback):
-        self._audio_cb = audio_callback
-        self._meta_cb  = meta_callback
-        self._proc:     Optional[asyncio.subprocess.Process] = None
-        self._tasks:    list[asyncio.Task] = []
-        self._audio_fh: Optional[object]  = None
+    def __init__(self, audio_callback: AudioCallback, meta_callback: MetaCallback,
+                 call_end_callback: Optional[CallEndCallback] = None):
+        self._audio_cb    = audio_callback
+        self._meta_cb     = meta_callback
+        self._call_end_cb = call_end_callback
+        self._proc:       Optional[asyncio.subprocess.Process] = None
+        self._tasks:      list[asyncio.Task] = []
+        self._audio_fh:   Optional[object]   = None
 
         # Per-slot persistent call context (1-indexed: slot 1 and 2)
         self._slot_ctx: dict[int, dict] = {
@@ -121,9 +125,15 @@ class DMRDecoder:
             2: {"src_id": 0, "dst_id": 0, "group": True, "alias": ""},
         }
         # dsd-fme stderr parser state
-        self._active_slot  = 1   # 1-indexed
-        self._active_cc    = 0
+        self._active_slot   = 1   # 1-indexed
+        self._active_cc     = 0
         self._pending_ftype = "UNKNOWN"
+
+        # Call tracking state (for history log)
+        self._recording:         bool             = False
+        self._active_call:       Optional[dict]   = None
+        # Set by _clear_call (sync); drained by _read_stderr (async)
+        self._pending_finalize:  Optional[dict]   = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -225,6 +235,10 @@ class DMRDecoder:
                 _lines += 1
 
                 frame = self._parse_line(line)
+                if self._pending_finalize is not None:
+                    call_info            = self._pending_finalize
+                    self._pending_finalize = None
+                    await self._do_finalize(call_info)
                 if frame is not None:
                     try:
                         await self._meta_cb(frame.to_dict())
@@ -259,7 +273,9 @@ class DMRDecoder:
             self._pending_ftype = _map_ftype(raw_ftype)
             if raw_ftype.startswith("VLC"):
                 self._clear_call(self._active_slot)
-            return self._make_frame(line)
+            frame = self._make_frame(line)
+            self._maybe_start_recording(frame)
+            return frame
 
         # --- Sync line (MS/DM mode): no slot bracket, check it's a Sync line ---
         if "Sync:" in line:
@@ -270,7 +286,9 @@ class DMRDecoder:
                 self._pending_ftype = _map_ftype(raw_ftype)
                 if raw_ftype.startswith("VLC"):
                     self._clear_call(self._active_slot)
-                return self._make_frame(line)
+                frame = self._make_frame(line)
+                self._maybe_start_recording(frame)
+                return frame
 
         # --- LC data line: update slot context ---
         # Do NOT update _active_slot here — dsd-fme reports "SLOT 1" in
@@ -310,12 +328,20 @@ class DMRDecoder:
                     if len(alias) >= len(current):
                         self._slot_ctx[slot]["alias"] = alias
                         logger.info("Alias TS%d: %s", slot, alias)
+                        if (self._active_call and
+                                self._active_call.get("slot") == slot and
+                                len(alias) >= len(self._active_call.get("alias", ""))):
+                            self._active_call["alias"] = alias
             return None
 
         return None
 
     def _clear_call(self, slot: int) -> None:
         """Reset per-call fields when a new Voice LC Header is detected."""
+        if self._recording and self._active_call:
+            self._pending_finalize = dict(self._active_call)
+        self._recording   = False
+        self._active_call = None
         if slot in self._slot_ctx:
             ctx = self._slot_ctx[slot]
             ctx["src_id"] = 0
@@ -339,6 +365,40 @@ class DMRDecoder:
             raw_line    = raw_line.strip(),
         )
 
+    def _maybe_start_recording(self, frame: "DMRFrame") -> None:
+        if frame.frame_type == "VOICE" and frame.src_id != 0 and not self._recording:
+            self._recording  = True
+            self._rec_start  = time.time()
+            self._active_call = {
+                "src_id":     frame.src_id,
+                "dst_id":     frame.dst_id,
+                "group":      frame.group,
+                "alias":      frame.alias,
+                "slot":       self._active_slot,
+                "start_time": self._rec_start,
+            }
+
+    async def _do_finalize(self, call_info: dict) -> None:
+        if not self._call_end_cb:
+            return
+        end_time   = time.time()
+        start_time = call_info.get("start_time", end_time)
+        src_id     = call_info.get("src_id", 0)
+        record = {
+            "id":         f"{datetime.fromtimestamp(start_time).strftime('%Y%m%d_%H%M%S')}_{src_id}",
+            "started_at": datetime.fromtimestamp(start_time).isoformat(),
+            "ended_at":   datetime.fromtimestamp(end_time).isoformat(),
+            "duration_s": round(end_time - start_time, 1),
+            "src_id":     src_id,
+            "dst_id":     call_info.get("dst_id", 0),
+            "group":      call_info.get("group", True),
+            "alias":      call_info.get("alias", ""),
+        }
+        try:
+            await self._call_end_cb(record)
+        except Exception:
+            logger.exception("call_end_callback raised an exception")
+
     async def _read_audio_wav(self) -> None:
         """Stream decoded PCM from dsd-fme's WAV output file."""
         if self._audio_fh is None:
@@ -360,7 +420,7 @@ class DMRDecoder:
         logger.info("Audio WAV ready — sample_rate=%d Hz, channels=%d, bits=%d", sr, channels, bits)
 
         # Pacing: track audio-time sent vs wall-clock; reset on silence gap.
-        PACE_AHEAD  = 0.10   # max seconds ahead of real-time before throttling
+        PACE_AHEAD  = 0.50   # max seconds ahead of real-time before throttling
         GAP_RESET_S = 0.30   # silence longer than this resets the pacing reference
         _pace_t0:      float = 0.0
         _pace_bytes:   int   = 0
@@ -415,7 +475,7 @@ class DMRDecoder:
                 else:
                     # No new WAV data
                     if _last_data_t > 0 and now - _last_data_t > GAP_RESET_S:
-                        # Silence gap — discard any partial buffer and reset pacing
+                        # Silence gap — reset pacing only; call end is signalled by VLC header
                         _buf.clear()
                         _pace_t0     = 0.0
                         _pace_bytes  = 0

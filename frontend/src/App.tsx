@@ -7,6 +7,7 @@ import Controls from './components/Controls'
 import ContactsPanel from './components/ContactsPanel'
 import MapPanel from './components/MapPanel'
 import MemoryChannels from './components/MemoryChannels'
+import CallHistory from './components/CallHistory'
 
 export default function App() {
   const [freq, setFreq] = useState(438800000)
@@ -45,16 +46,21 @@ export default function App() {
       </div>
       <MemoryChannels currentFreq={freq} currentGain={gain} onRecall={tuneTo} />
       <div className="main">
-        <div className="waterfall-wrap">
-          <Waterfall centerFreqHz={freq} onClickTune={f => tuneTo(f, gain)} />
+        <div className="left-col">
+          <div className="waterfall-wrap">
+            <Waterfall centerFreqHz={freq} onClickTune={f => tuneTo(f, gain)} />
+          </div>
+          <div className="bottom-row">
+            <DMRPanel />
+            <ContactsPanel />
+            <AudioPlayer />
+          </div>
+          <div className="map-wrap">
+            <MapPanel />
+          </div>
         </div>
-        <div className="bottom-row">
-          <DMRPanel />
-          <ContactsPanel />
-          <AudioPlayer />
-        </div>
-        <div className="map-wrap">
-          <MapPanel />
+        <div className="right-col">
+          <CallHistory />
         </div>
       </div>
     </>

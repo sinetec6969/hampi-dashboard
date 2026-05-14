@@ -4,7 +4,9 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
 .header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #111; border-bottom: 1px solid #333; flex-shrink: 0; }
 .header-title { font-size: 1.2rem; color: #00ff88; font-weight: bold; }
 .header-freq { font-size: 1.4rem; color: #fff; letter-spacing: 2px; }
-.main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.main { display: flex; flex-direction: row; flex: 1; min-height: 0; }
+.left-col { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.right-col { width: 340px; flex-shrink: 0; border-left: 1px solid #2a2a2a; display: flex; flex-direction: column; overflow: hidden; }
 .waterfall-wrap { flex: 0 0 220px; height: 220px; position: relative; overflow: hidden; }
 .bottom-row { display: flex; height: 220px; flex-shrink: 0; border-top: 1px solid #333; }
 .map-wrap { flex: 1; min-height: 0; border-top: 1px solid #333; overflow: hidden; }

@@ -3,7 +3,9 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and plots callers on a live world map — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.6_th3d3vi1
+**Version:** 0.0.8_stormtrooper
+
+> ⚠️ **Audio playback is not yet fully functional.** DMR voice is decoded and streamed, but playback can still be choppy or cut out depending on network conditions and Pi CPU load. Work in progress.
 
 ---
 
@@ -141,6 +143,15 @@ RTL-SDR dongle
 
 ## Version History
 
+### 0.0.8_stormtrooper
+- **Call history panel** — persistent log of all completed DMR calls, displayed in a dedicated right-side column. Each entry shows time, duration, talkgroup, callsign, full name, and city/state from RadioID.net. History is written to `call_history.json` on disk and survives restarts (200-call rolling window). New calls broadcast live to the browser via the existing `/ws/dmr` WebSocket as `type: "call_record"` frames.
+- **Call detection** — call start triggered on first VC* frame with a non-zero `src_id`; call end triggered by the VLC header of the next transmission (`_clear_call`). Prevents duplicate entries mid-transmission that were previously caused by the 300 ms silence-gap finalizer firing between DMR audio bursts.
+- **RadioID enrichment at call-end** — `on_call_end` awaits `_lookup_dmr_id()` before logging, so name/location are always present in the stored record. Lookup hits the existing 1-hour in-memory cache; no extra network requests when the DMR panel has already resolved the ID.
+- **Layout: two-column** — all signal panels (waterfall, DMR, contacts, audio, map) moved to a left flex column; call history occupies a fixed 340 px right column, full viewport height, independently scrollable.
+- **Audio: pre-buffer increased** — `PACE_AHEAD` raised 100 ms → 500 ms so the backend keeps 500 ms of decoded PCM queued in the WebSocket pipe before throttling. Reduces underruns caused by Pi CPU scheduling jitter.
+- **Audio: worklet re-prime removed** — AudioWorklet was resetting `_primed = false` every time the queue drained between DMR frame bursts (~every 100 ms), forcing a fresh 150 ms accumulation before each resume. Worklet now outputs silence during gaps and resumes immediately when data arrives.
+- **Audio: worklet initial buffer raised** — target raised 150 ms → 500 ms to match the new pre-buffer depth.
+
 ### 0.0.6_th3d3vi1
 - **Waterfall click/touch-to-tune** — clicking or tapping anywhere on the waterfall canvas immediately tunes to that frequency. Mouse hover draws a green vertical crosshair with a floating frequency label (flips side at centre so it never clips the edge); touch fires the tune directly. Frequency calculated as `centerFreq + (x/width − 0.5) × 2.4 MHz`, rounded to the nearest Hz, and POSTed to `/api/tune`.
 - **Memory channels** — a persistent channel bank bar sits between the header and the waterfall. Click `+ Save` to name and store the current frequency and gain; clicking any channel pill instantly recalls and tunes to it; `×` deletes. Channels are saved to `localStorage` (`hampi-memory-channels`) so they survive page reloads and browser restarts.
@@ -231,7 +242,7 @@ RTL-SDR dongle
 
 ### DMR Intelligence
 - [ ] Full RadioID.net database import for offline ID lookups (no API rate limits)
-- [ ] Call history log — persist calls with timestamp, duration, TG, ID, transcript
+- [x] Call history log — persist calls with timestamp, duration, TG, ID, transcript
 - [ ] Talkgroup alias file (CSV import — map TG numbers to friendly names)
 - [ ] DTMF and MDC-1200 decode for analog channels
 

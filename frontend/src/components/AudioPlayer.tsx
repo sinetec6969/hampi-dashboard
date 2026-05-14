@@ -19,7 +19,7 @@ export default function AudioPlayer() {
   async function startWorklet(ctx: AudioContext) {
     await ctx.audioWorklet.addModule('/audio-processor.js')
 
-    const targetSamples = Math.round(ctx.sampleRate * 0.15)
+    const targetSamples = Math.round(ctx.sampleRate * 0.50)
     const worklet = new AudioWorkletNode(ctx, 'pcm-processor', {
       processorOptions: { targetSamples },
     })
