@@ -3,7 +3,7 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and plots callers on a live world map — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.8-1_THEYMISSEDTHEBARN
+**Version:** 0.0.9_DASHBOARDASSEMBLE
 
 > ⚠️ **Audio playback is not yet fully functional.** DMR voice is decoded and streamed, but playback can still be choppy or cut out depending on network conditions and Pi CPU load. Work in progress.
 
@@ -142,6 +142,13 @@ RTL-SDR dongle
 ---
 
 ## Version History
+
+### 0.0.9_DASHBOARDASSEMBLE
+- **Home page** — landing page at `/` with mode cards for all five dashboard modes (DMR live, ADS-B / APRS / Meshtastic / Airband as coming-soon). Each card shows status badge, description, and navigates to the mode page on click.
+- **Multi-page routing** — `react-router-dom` v6 added; `BrowserRouter` wraps the app; `NavLink`-based top nav bar (40px) persists across all pages with active-link highlight.
+- **Per-mode pages** — `/dmr`, `/adsb`, `/aprs`, `/meshtastic`, `/airband`. DMR page is the full existing dashboard; the four coming-soon pages list planned features and hardware requirements with a link to ROADMAP.md.
+- **System info** — `GET /api/sysinfo` returns hostname, local LAN IP, Tailscale IP (via `tailscale ip -4`), and version string. Displayed in the home page hero section so both local and Tailscale access URLs are immediately visible.
+- **Tailscale access** — no server-side changes required; Tailscale provides the Pi a stable `100.x.x.x` IP accessible from any enrolled device. The Tailscale IP is surfaced on the home page.
 
 ### 0.0.8-1_THEYMISSEDTHEBARN
 - **ROADMAP.md added** — full pre-beta roadmap covering ADS-B, APRS, Meshtastic, and airband AM reception, each with backend/frontend design notes. Includes hardware migration path (Pi 4 → Pi 5), multi-dongle strategy, planned `config.yaml`, systemd service targets, and priority order through beta.

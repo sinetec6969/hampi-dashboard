@@ -17,6 +17,8 @@ import asyncio
 import json
 import logging
 import os
+import socket
+import subprocess
 import time
 from contextlib import asynccontextmanager
 from typing import Optional, Set
@@ -326,6 +328,33 @@ async def ws_audio(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
+
+@app.get("/api/sysinfo")
+async def api_sysinfo():
+    info: dict = {
+        "hostname":     socket.gethostname(),
+        "local_ip":     None,
+        "tailscale_ip": None,
+        "version":      "0.0.8-1",
+    }
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        info["local_ip"] = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["tailscale", "ip", "-4"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            info["tailscale_ip"] = result.stdout.strip()
+    except Exception:
+        pass
+    return info
+
 
 @app.get("/api/status")
 async def api_status():

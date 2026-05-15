@@ -2,8 +2,8 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.0.8-1_THEYMISSEDTHEBARN  
-> **Status:** Pre-beta. DMR voice decode, call history log, and live caller map are functional. Audio playback is work-in-progress. The features below are planned additions before a stable beta release.
+> **Current version:** 0.0.9_DASHBOARDASSEMBLE  
+> **Status:** Pre-beta. DMR voice decode, call history log, and live caller map are functional. Multi-page shell with home/nav is live. Audio playback is work-in-progress. The features below are planned additions before a stable beta release.
 
 ---
 
