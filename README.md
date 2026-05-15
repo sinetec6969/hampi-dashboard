@@ -3,7 +3,7 @@
 A real-time SDR (Software Defined Radio) dashboard for the Raspberry Pi, built around an RTL-SDR dongle. Streams a live waterfall, decodes DMR digital voice, plays decoded audio, and plots callers on a live world map — all in a browser.
 
 **Stack:** FastAPI (Python) backend + React/Vite frontend  
-**Version:** 0.0.8_stormtrooper
+**Version:** 0.0.8-1_THEYMISSEDTHEBARN
 
 > ⚠️ **Audio playback is not yet fully functional.** DMR voice is decoded and streamed, but playback can still be choppy or cut out depending on network conditions and Pi CPU load. Work in progress.
 
@@ -142,6 +142,10 @@ RTL-SDR dongle
 ---
 
 ## Version History
+
+### 0.0.8-1_THEYMISSEDTHEBARN
+- **ROADMAP.md added** — full pre-beta roadmap covering ADS-B, APRS, Meshtastic, and airband AM reception, each with backend/frontend design notes. Includes hardware migration path (Pi 4 → Pi 5), multi-dongle strategy, planned `config.yaml`, systemd service targets, and priority order through beta.
+- **`.gitignore` updated** — `call_history.json` and `recordings/` excluded from version control (runtime data).
 
 ### 0.0.8_stormtrooper
 - **Call history panel** — persistent log of all completed DMR calls, displayed in a dedicated right-side column. Each entry shows time, duration, talkgroup, callsign, full name, and city/state from RadioID.net. History is written to `call_history.json` on disk and survives restarts (200-call rolling window). New calls broadcast live to the browser via the existing `/ws/dmr` WebSocket as `type: "call_record"` frames.

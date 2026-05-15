@@ -12,3 +12,7 @@ frontend/dist/
 # Misc
 .DS_Store
 *.log
+
+# Runtime data
+call_history.json
+recordings/
