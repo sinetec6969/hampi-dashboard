@@ -3,7 +3,13 @@ import { useRef, useState } from 'react'
 type Status = 'stopped' | 'connecting' | 'streaming'
 type Mode   = 'worklet' | 'scheduled'
 
-export default function AudioPlayer() {
+interface Props {
+  wsPath?:       string   // default: '/ws/audio'
+  inputRate?:    number   // default: 8000  (Hz of incoming PCM)
+  label?:        string   // default: 'Audio'
+}
+
+export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, label = 'Audio' }: Props) {
   const [status, setStatus] = useState<Status>('stopped')
   const [mode,   setMode]   = useState<Mode>('worklet')
   const [err,    setErr]    = useState('')
@@ -26,9 +32,9 @@ export default function AudioPlayer() {
     worklet.connect(ctx.destination)
     workletRef.current = worklet
 
-    const ratio = ctx.sampleRate / 8000
+    const ratio = ctx.sampleRate / inputRate
 
-    const ws = new WebSocket(`ws://${location.host}/ws/audio`)
+    const ws = new WebSocket(`ws://${location.host}${wsPath}`)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
 
@@ -37,6 +43,7 @@ export default function AudioPlayer() {
     ws.onerror = () => setStatus('stopped')
 
     ws.onmessage = e => {
+      if (!(e.data instanceof ArrayBuffer)) return  // skip JSON status frames
       const i16 = new Int16Array(e.data)
       const out = new Float32Array(Math.round(i16.length * ratio))
       for (let i = 0; i < out.length; i++) {
@@ -55,7 +62,7 @@ export default function AudioPlayer() {
   function startScheduled(ctx: AudioContext) {
     nextTimeRef.current = ctx.currentTime + 0.5
 
-    const ws = new WebSocket(`ws://${location.host}/ws/audio`)
+    const ws = new WebSocket(`ws://${location.host}${wsPath}`)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
 
@@ -64,11 +71,12 @@ export default function AudioPlayer() {
     ws.onerror = () => setStatus('stopped')
 
     ws.onmessage = e => {
+      if (!(e.data instanceof ArrayBuffer)) return  // skip JSON status frames
       const i16 = new Int16Array(e.data)
       const f32 = new Float32Array(i16.length)
       for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768
 
-      const buf = ctx.createBuffer(1, f32.length, 8000)
+      const buf = ctx.createBuffer(1, f32.length, inputRate)
       buf.getChannelData(0).set(f32)
 
       const src = ctx.createBufferSource()
@@ -137,7 +145,7 @@ export default function AudioPlayer() {
 
   return (
     <div className="panel" style={{ flex: '1' }}>
-      <div className="panel-title">Audio</div>
+      <div className="panel-title">{label}</div>
       <div style={{ marginTop: 8 }}>
         <span style={{ color: dot[status], fontSize: '0.8rem', marginRight: 12 }}>
           ● {status}

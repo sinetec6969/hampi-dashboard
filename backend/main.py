@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
+from airband import AirbandScanner, DEFAULT_CHANNELS
 from dmr import DMRDecoder
 from sdr import SDREngine
 
@@ -57,15 +58,37 @@ HISTORY_FILE:   str   = os.getenv("HISTORY_FILE",
                                    os.path.join(os.path.dirname(__file__), "..", "call_history.json"))
 MAX_HISTORY:    int   = 200
 
+# Airband configuration
+AIRBAND_ENABLE:  bool  = os.getenv("AIRBAND_ENABLE", "1") == "1"
+AIRBAND_RTL_DEV: int   = int(os.getenv("AIRBAND_RTL_DEV",  "1"))
+AIRBAND_RTL_PORT:int   = int(os.getenv("AIRBAND_RTL_PORT", "1235"))
+AIRBAND_GAIN:    float = float(os.getenv("AIRBAND_GAIN",   "40.0"))
+AIRBAND_SQUELCH: float = float(os.getenv("AIRBAND_SQUELCH","0.01"))
+AIRBAND_DWELL:   int   = int(os.getenv("AIRBAND_DWELL_MS", "2000"))
+
 # ---------------------------------------------------------------------------
 # Shared state
 # ---------------------------------------------------------------------------
 sdr:     SDREngine
 decoder: DMRDecoder
+airband: Optional[AirbandScanner] = None
 
 waterfall_clients: Set[WebSocket] = set()
 dmr_clients:       Set[WebSocket] = set()
 audio_clients:     Set[WebSocket] = set()
+airband_clients:   Set[WebSocket] = set()
+
+# Last-known airband status — returned by /api/airband/status
+airband_status: dict = {
+    "enabled":      False,
+    "active_idx":   0,
+    "channel":      None,
+    "squelch_open": False,
+    "scanner_on":   True,
+    "squelch":      AIRBAND_SQUELCH,
+    "dwell_ms":     AIRBAND_DWELL,
+    "channels":     DEFAULT_CHANNELS,
+}
 
 call_history: list[dict] = []
 
@@ -116,6 +139,19 @@ async def broadcast_json(clients: Set[WebSocket], payload: dict) -> None:
         except Exception:
             dead.add(ws)
     clients -= dead
+
+
+# ---------------------------------------------------------------------------
+# Airband callbacks
+# ---------------------------------------------------------------------------
+
+async def on_airband_audio(pcm: bytes) -> None:
+    await broadcast_bytes(airband_clients, pcm)
+
+
+async def on_airband_status(status: dict) -> None:
+    airband_status.update(status)
+    await broadcast_json(airband_clients, status)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +251,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder
+    global sdr, decoder, airband
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -243,6 +279,29 @@ async def lifespan(app: FastAPI):
     # Launch SDR acquisition loop
     task = asyncio.create_task(sdr_loop(), name="sdr-loop")
 
+    # Start airband scanner (optional — graceful on failure)
+    if AIRBAND_ENABLE:
+        try:
+            airband = AirbandScanner(
+                channels=DEFAULT_CHANNELS,
+                squelch=AIRBAND_SQUELCH,
+                dwell_ms=AIRBAND_DWELL,
+                gain=AIRBAND_GAIN,
+                rtl_device=AIRBAND_RTL_DEV,
+                rtl_port=AIRBAND_RTL_PORT,
+                audio_callback=on_airband_audio,
+                status_callback=on_airband_status,
+            )
+            await airband.start()
+            airband_status["enabled"]  = True
+            airband_status["channels"] = DEFAULT_CHANNELS
+            logger.info("AirbandScanner started on device=%d port=%d",
+                        AIRBAND_RTL_DEV, AIRBAND_RTL_PORT)
+        except Exception:
+            logger.warning("AirbandScanner failed to start — airband disabled",
+                           exc_info=True)
+            airband = None
+
     yield  # application is running
 
     # Shutdown
@@ -250,6 +309,8 @@ async def lifespan(app: FastAPI):
     await asyncio.gather(task, return_exceptions=True)
     await decoder.stop()
     sdr.stop()
+    if airband is not None:
+        await airband.stop()
     logger.info("Shutdown complete")
 
 
@@ -323,6 +384,28 @@ async def ws_audio(websocket: WebSocket):
         audio_clients.discard(websocket)
         logger.info("Audio client disconnected — total=%d", len(audio_clients))
 
+
+@app.websocket("/ws/airband")
+async def ws_airband(websocket: WebSocket):
+    await websocket.accept()
+    airband_clients.add(websocket)
+    logger.info("Airband client connected — total=%d", len(airband_clients))
+    # Send current status immediately on connect
+    try:
+        import json as _json
+        await websocket.send_text(_json.dumps({"type": "status", **airband_status}))
+    except Exception:
+        pass
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in airband WebSocket handler")
+    finally:
+        airband_clients.discard(websocket)
+        logger.info("Airband client disconnected — total=%d", len(airband_clients))
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +544,47 @@ async def _lookup_dmr_id(dmr_id: int) -> dict:
 async def api_lookup(dmr_id: int):
     """Look up a DMR ID on RadioID.net; includes lat/lon from Nominatim geocoding."""
     return await _lookup_dmr_id(dmr_id)
+
+
+# ---------------------------------------------------------------------------
+# Airband REST endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/airband/status")
+async def api_airband_status():
+    return airband_status
+
+
+@app.post("/api/airband/squelch")
+async def api_airband_squelch(level: float):
+    if airband is None:
+        raise HTTPException(status_code=503, detail="Airband not running")
+    airband.set_squelch(level)
+    airband_status["squelch"] = airband.squelch
+    return {"squelch": airband.squelch}
+
+
+@app.post("/api/airband/scan")
+async def api_airband_scan(enabled: bool):
+    if airband is None:
+        raise HTTPException(status_code=503, detail="Airband not running")
+    airband.set_scanner(enabled)
+    airband_status["scanner_on"] = airband.scanner_on
+    return {"scanner_on": airband.scanner_on}
+
+
+@app.post("/api/airband/channel/{idx}")
+async def api_airband_channel(idx: int):
+    """Manually lock to a channel index (turns scanner off)."""
+    if airband is None:
+        raise HTTPException(status_code=503, detail="Airband not running")
+    if not airband.channels or idx < 0 or idx >= len(airband.channels):
+        raise HTTPException(status_code=400, detail="Invalid channel index")
+    airband.set_scanner(False)
+    airband_status["scanner_on"] = False
+    # _tune_to is async — run from this endpoint via create_task
+    asyncio.create_task(airband._tune_to(idx))
+    return {"active_idx": idx, "channel": airband.channels[idx]}
 
 
 # ---------------------------------------------------------------------------

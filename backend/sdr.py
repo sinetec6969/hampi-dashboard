@@ -27,7 +27,7 @@ HEADER_LEN = 12  # 4-byte magic + 4-byte tuner type + 4-byte tuner gain count
 class SDREngine:
     """
     Manages rtl_tcp subprocess, TCP socket connection, IQ reads,
-    FFT computation, and FM demodulation.
+    FFT computation, FM demodulation, and AM demodulation.
     """
 
     def __init__(
@@ -37,12 +37,14 @@ class SDREngine:
         gain: float = 49.6,
         rtl_tcp_host: str = "127.0.0.1",
         rtl_tcp_port: int = 1234,
+        device_index: int = 0,
     ):
         self.freq = freq
         self.sample_rate = sample_rate
         self.gain = gain
         self.host = rtl_tcp_host
         self.port = rtl_tcp_port
+        self.device_index = device_index
 
         self._proc: Optional[subprocess.Popen] = None
         self._sock: Optional[socket.socket] = None
@@ -51,7 +53,7 @@ class SDREngine:
         self._prev_sample: complex = 0 + 0j
         self._decim_ratio = self.sample_rate // 48_000  # 50
 
-        # Audio LPF applied AFTER decimation at 48 kHz.
+        # FM audio LPF applied AFTER decimation at 48 kHz.
         # At 48 kHz a 64-tap Hamming FIR gives -72 dB at 12.5 kHz (adjacent DMR
         # channel), which is the correct place to filter.  The same filter applied
         # at 2.4 MHz only gives -0.7 dB at 12.5 kHz — completely ineffective.
@@ -59,13 +61,17 @@ class SDREngine:
                                     window="hamming").astype(np.float32)
         self._audio_lpf_zi = np.zeros(len(self._audio_lpf) - 1, dtype=np.float32)
 
+        # AM demodulation state — 3.5 kHz LPF for voice bandwidth
+        self._am_lpf    = firwin(numtaps=64, cutoff=3_500, fs=48_000,
+                                  window="hamming").astype(np.float32)
+        self._am_lpf_zi = np.zeros(len(self._am_lpf) - 1, dtype=np.float32)
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def start(self) -> None:
         """Launch rtl_tcp and connect the control socket."""
-        gain_tenths = int(self.gain * 10)
         cmd = [
             "rtl_tcp",
             "-a", self.host,
@@ -73,6 +79,7 @@ class SDREngine:
             "-f", str(self.freq),
             "-s", str(self.sample_rate),
             "-g", str(self.gain),
+            "-d", str(self.device_index),
         ]
         logger.info("Starting rtl_tcp: %s", " ".join(cmd))
         self._proc = subprocess.Popen(
@@ -258,6 +265,67 @@ class SDREngine:
         demod *= 32767.0 / np.pi
         pcm = np.clip(demod, -32768, 32767).astype(np.int16)
         return pcm.tobytes()
+
+    # ------------------------------------------------------------------
+    # AM demodulation
+    # ------------------------------------------------------------------
+
+    def am_demodulate(self, iq: np.ndarray, target_freq: int) -> tuple[bytes, float]:
+        """
+        AM demodulate IQ samples centred at self.freq.
+
+        Steps:
+          1. Frequency-shift target_freq to DC (skipped if already there).
+          2. Decimate IQ from 2.4 MHz to 48 kHz (factor 50).
+          3. Envelope detection: abs() of complex baseband signal.
+          4. Low-pass filter at 3.5 kHz — 64-tap Hamming FIR for voice bandwidth.
+             Stateful (lfilter + zi) across chunk boundaries.
+          5. Remove DC bias (residual carrier offset).
+          6. Measure audio RMS (pre-AGC) — returned for squelch.
+          7. AGC: normalize to 0.3 full scale.
+          8. Scale and clip to int16.
+
+        Args:
+            iq:          Complex64 IQ array at self.sample_rate.
+            target_freq: Centre frequency of the AM carrier (Hz).
+
+        Returns:
+            (pcm_bytes, audio_rms) — PCM is int16 little-endian mono 48 kHz.
+            audio_rms is pre-AGC modulation amplitude; use for squelch threshold.
+        """
+        n = len(iq)
+
+        # 1. Frequency shift so target_freq lands at DC
+        freq_offset = target_freq - self.freq
+        if freq_offset != 0:
+            t = np.arange(n, dtype=np.float32) / self.sample_rate
+            shift = np.exp(-2j * np.pi * freq_offset * t).astype(np.complex64)
+            iq = iq * shift
+
+        # 2. Decimate to 48 kHz
+        decimated = iq[::self._decim_ratio]
+
+        # 3. AM envelope detection
+        envelope = np.abs(decimated).astype(np.float32)
+
+        # 4. LPF: smooth envelope, pass voice band, reject carrier ripple
+        envelope, self._am_lpf_zi = lfilter(
+            self._am_lpf, [1.0], envelope, zi=self._am_lpf_zi
+        )
+
+        # 5. Remove DC (carrier level)
+        envelope -= np.mean(envelope)
+
+        # 6. Audio RMS for squelch — measure before AGC
+        audio_rms = float(np.sqrt(np.mean(envelope ** 2)))
+
+        # 7. AGC
+        if audio_rms > 1e-6:
+            envelope *= 0.3 / audio_rms
+
+        # 8. Scale to int16
+        pcm = np.clip(envelope * 32767.0, -32768, 32767).astype(np.int16)
+        return pcm.tobytes(), audio_rms
 
     # ------------------------------------------------------------------
     # Runtime tuning

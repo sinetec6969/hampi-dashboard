@@ -113,3 +113,33 @@ input[type=number], input[type=range] { background: #1a1a1a; color: #e0e0e0; bor
 .stt-entry { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; border-bottom: 1px solid #1a1a1a; font-size: 0.72rem; }
 .stt-time { color: #555; font-size: 0.65rem; white-space: nowrap; flex-shrink: 0; }
 .stt-text { color: #e0e0e0; line-height: 1.4; word-break: break-word; }
+
+/* ── Airband page ───────────────────────────────────────────── */
+.airband-page { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.airband-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #111; border-bottom: 1px solid #333; flex-shrink: 0; }
+.airband-title { font-size: 1.1rem; color: #44ccff; font-weight: bold; letter-spacing: 1px; }
+.airband-header-right { display: flex; align-items: center; gap: 12px; }
+.airband-squelch-dot { width: 10px; height: 10px; border-radius: 50%; background: #333; border: 1px solid #555; transition: background 0.2s, box-shadow 0.2s; }
+.airband-squelch-dot.open { background: #44ccff; box-shadow: 0 0 8px #44ccff; }
+.airband-disabled-badge { font-size: 0.72rem; color: #555; letter-spacing: 0.5px; }
+
+.airband-body { flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
+
+.airband-freqlist { width: 260px; flex-shrink: 0; border-right: 1px solid #222; padding: 12px 8px; overflow-y: auto; }
+.airband-no-channels { font-size: 0.75rem; color: #444; margin-top: 8px; }
+.airband-ch-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 3px; cursor: pointer; border: 1px solid transparent; margin-bottom: 3px; transition: background 0.1s; }
+.airband-ch-row:hover { background: #161616; }
+.airband-ch-row.active { background: #0d1f2a; border-color: #44ccff33; }
+.airband-ch-row.active.rx { background: #0d2a1f; border-color: #44ccff88; }
+.airband-ch-indicator { font-size: 0.6rem; width: 10px; color: #44ccff; flex-shrink: 0; }
+.airband-ch-row.rx .airband-ch-indicator { animation: blink 0.8s step-end infinite; }
+.airband-ch-label { font-size: 0.8rem; color: #ccc; flex: 1; }
+.airband-ch-row.active .airband-ch-label { color: #44ccff; }
+.airband-ch-freq { font-size: 0.72rem; color: #555; letter-spacing: 0.5px; white-space: nowrap; }
+.airband-ch-row.active .airband-ch-freq { color: #44ccff99; }
+
+.airband-controls { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 0; }
+.airband-setup-hint { background: #111; border: 1px solid #222; border-radius: 4px; padding: 12px; margin-top: 8px; font-size: 0.78rem; color: #666; line-height: 1.7; }
+.airband-setup-hint code { display: inline-block; background: #1a1a1a; padding: 2px 6px; border-radius: 3px; color: #aaa; font-size: 0.75rem; margin: 2px 0; }
+
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }

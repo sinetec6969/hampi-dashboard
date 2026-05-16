@@ -2,8 +2,36 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.0.911 (2026-05-15)  
-> **Status:** Pre-beta. DMR voice decode, call history, caller map, and multi-page dashboard shell are functional. Audio playback is work-in-progress. The features below are planned additions before a stable beta release.
+> **Current version:** 0.1-1_itbegins (2026-05-16)  
+> **Status:** Pre-beta. DMR voice decode, call history, caller map, multi-page dashboard shell, and AM airband scanner are functional. DMR audio playback is work-in-progress (see warnings below).
+
+---
+
+## ⚠️ Known Issues & Warnings
+
+### DMR Audio Choppiness
+DMR audio decoded via `dsd-fme` is currently choppy / intermittent. The root cause is not fully resolved. PACE_AHEAD tuning helped but the issue persists under load on the Pi 4. **Do not rely on DMR audio for monitoring-critical use** until this is fixed.
+
+Suspected causes under investigation:
+- `dsd-fme` WAV file write bursts cause irregular chunk sizes at the reader
+- Pi 4 CPU contention between the SDR acquisition loop and dsd-fme's AMBE decoder
+- Audio pacing reference drift over long sessions
+
+Workaround: restart the server to reset the audio pipeline; audio tends to be cleaner in the first few minutes of a session.
+
+### Multiple SDR Dongles Required for Simultaneous Modes
+Each active receive mode (DMR, airband, ADS-B, APRS) needs its own RTL-SDR dongle running a dedicated `rtl_tcp` instance. **You cannot run two modes on the same dongle simultaneously.**
+
+| Mode | Default device | Default port |
+|---|---|---|
+| DMR | device 0 | 1234 |
+| Airband | device 1 | 1235 |
+| ADS-B | dedicated (dump1090) | — |
+| APRS | device 2 (planned) | 1236 |
+
+**Single-dongle workaround:** Set `AIRBAND_RTL_DEV=0` to share the DMR dongle — but you must stop/restart the server to switch modes. They cannot be active at the same time.
+
+**udev rules are essential** on multi-dongle setups to prevent dongles from swapping device indices across reboots. Without them, a reboot may assign DMR's dongle to airband and vice versa. See Infrastructure section below.
 
 ---
 
@@ -11,13 +39,46 @@ Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a
 
 | Phase | Board | Notes |
 |---|---|---|
-| Current | Raspberry Pi 4 (4 GB) | Running DMR stack |
+| Current | Raspberry Pi 4 (4 GB) | DMR + airband (2 dongles) |
 | Pre-beta | Raspberry Pi 5 (8 GB) | Better compute for parallel decoders + ADS-B + Meshtastic |
 
-**SDR dongles needed (estimate):**
-- Dongle 1 — DMR / APRS / airband scanner (shared, one at a time, or scanning)
-- Dongle 2 — ADS-B dedicated (1090 MHz, benefits from always-on)
-- Optional dongle 3 — simultaneous airband while DMR is active
+**SDR dongles — current and planned:**
+| Dongle | Band | Mode | Status |
+|---|---|---|---|
+| 0 | ~430–440 MHz | DMR | ✅ Working |
+| 1 | 118–137 MHz | Airband AM | ✅ Implemented |
+| 2 | 1090 MHz | ADS-B (`dump1090`) | Planned |
+| 3 | 144.390 MHz | APRS (`direwolf`) | Planned |
+
+---
+
+## Feature Status
+
+### ✅ Airband AM Reception
+
+Receive VHF airband voice (118–137 MHz) with AM demodulation and channel scanner.
+
+**Implemented:**
+- `sdr.py` — `am_demodulate()`: IQ → freq shift → decimate 2.4 MHz→48 kHz → envelope detection (`abs`) → 3.5 kHz LPF → DC remove → AGC → int16 PCM at 48 kHz
+- `airband.py` — `AirbandScanner`: owns its own `rtl_tcp` instance; cycles channel list with configurable dwell; holds on squelch break + 1 s hang; gated audio (only streams PCM when squelch is open)
+- `backend/main.py` — `/ws/airband` WebSocket (mixed binary PCM + JSON status frames); REST endpoints: `GET /api/airband/status`, `POST /api/airband/squelch`, `POST /api/airband/scan`, `POST /api/airband/channel/{idx}`
+- `frontend/src/pages/AirbandPage.tsx` — frequency list with active-channel highlight + RX blink, audio player (AudioWorklet), squelch slider, scanner toggle
+- `AudioPlayer.tsx` — parametrized (`wsPath`, `inputRate`, `label`) for reuse across modes
+
+**Configuration (env vars):**
+```
+AIRBAND_ENABLE=1          # 1 = start scanner on boot (default: 1)
+AIRBAND_RTL_DEV=1         # RTL-SDR device index (default: 1)
+AIRBAND_RTL_PORT=1235     # rtl_tcp port (default: 1235)
+AIRBAND_GAIN=40.0         # tuner gain dB (default: 40.0)
+AIRBAND_SQUELCH=0.01      # squelch threshold — tune for your noise floor
+AIRBAND_DWELL_MS=2000     # ms per channel when scanning
+```
+
+**Known limitations:**
+- Channel list is hardcoded (Guard, CTAF, Center, Departure) — `config.yaml` support planned
+- No ATIS text decode
+- Squelch is audio-RMS based — works well for AM voice; may need adjustment near strong carriers
 
 ---
 
@@ -26,6 +87,8 @@ Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a
 ### 1. ADS-B Dashboard
 
 Decode aircraft transponder broadcasts on 1090 MHz and display live traffic on a map.
+
+**Requires: dedicated RTL-SDR dongle (device 2)**
 
 **Backend:**
 - Run `dump1090-fa` or `readsb` as a managed subprocess (same pattern as `rtl_tcp`)
@@ -52,6 +115,8 @@ Decode aircraft transponder broadcasts on 1090 MHz and display live traffic on a
 
 Decode Automatic Packet Reporting System traffic on 144.390 MHz (North America) or regional equivalent.
 
+**Requires: dedicated RTL-SDR dongle (device 3 recommended, or time-share with DMR)**
+
 **Backend:**
 - `direwolf` as the TNC — receives FM-demodulated audio from the SDR, outputs APRS frames to stdout
 - Parse APRS frames: position, weather, messages, objects, telemetry
@@ -69,13 +134,14 @@ Decode Automatic Packet Reporting System traffic on 144.390 MHz (North America) 
 
 **Notes:**
 - `direwolf` can also act as a digipeater / igate if ever desired — architecture supports it
-- May share an SDR dongle with DMR via time-division or use a dedicated stick on 144 MHz
 
 ---
 
 ### 3. Meshtastic Decoding
 
 Monitor a local Meshtastic LoRa mesh network — node positions, messages, telemetry.
+
+**Requires: Meshtastic USB device (no SDR needed)**
 
 **Backend:**
 - Connect to a Meshtastic device via USB serial or TCP using the `meshtastic` Python package
@@ -93,46 +159,15 @@ Monitor a local Meshtastic LoRa mesh network — node positions, messages, telem
 - Node list table — sortable, shows online/offline (last heard < 15 min = online)
 - Telemetry sparklines (battery voltage, temperature if reported)
 
-**Notes:**
-- Does not require an SDR — communicates directly with a Meshtastic USB device
-- No RF licensing required for monitoring-only (no TX needed)
-
----
-
-### 4. Airband AM Reception
-
-Receive VHF airband voice (118–137 MHz) with AM demodulation.
-
-**Backend:**
-- Extend `sdr.py` `SDREngine` with AM demodulation path alongside existing FM
-- Demodulation: frequency-shift to target → decimate 2.4 MHz → 48 kHz → AM envelope detection (abs + LPF) → AGC → int16 PCM
-- Scanner mode: cycle through a configurable frequency list with configurable dwell time; hold on squelch break
-- Config: frequency list stored in `config.yaml` (see Infrastructure below) with labels (e.g., "ATIS", "Ground", "Tower", "Approach")
-- WebSocket endpoint `/ws/airband` — raw PCM audio, same format as DMR audio stream
-
-**Frontend:**
-- Airband panel with frequency list — highlight active (squelch open) frequency
-- Integrated audio player (same AudioWorklet path as DMR)
-- Squelch control slider
-- Scanner on/off toggle and dwell-time setting
-- Optionally display current ATIS text if a separate ATIS decoder is added later
-
-**Notes:**
-- Sharing the RTL-SDR with DMR requires time-multiplexing or a second dongle
-- A second dongle dedicated to 118–137 MHz is the recommended path for simultaneous airband + DMR
-- AM demodulation is straightforward to add to `sdr.py` — significantly simpler than FM discriminator
-
 ---
 
 ## Current DMR Dashboard — Remaining Pre-Beta Items
 
-These are open items on the existing DMR stack before calling it stable.
-
-### Audio (highest priority)
-- [ ] Fix audio choppiness — root cause still under investigation; PACE_AHEAD increase helped but not resolved
+### Audio (highest priority — see warning above)
+- [ ] Fix audio choppiness — root cause still under investigation
 - [ ] Volume control slider in the UI
 - [ ] Per-talkgroup squelch / mute
-- [ ] Audio recording — save decoded voice to timestamped WAV files per call (was implemented, removed; re-add when audio pipeline is stable)
+- [ ] Audio recording — save decoded voice to timestamped WAV files per call
 
 ### DMR Intelligence
 - [ ] Talkgroup alias file — CSV import mapping TG numbers to friendly names (e.g., "91 → Worldwide", "3116 → Texas")
@@ -140,24 +175,37 @@ These are open items on the existing DMR stack before calling it stable.
 
 ### Infrastructure
 - [ ] Systemd service file — `hampi-dashboard.service` for auto-start on boot, restart on failure
-- [ ] Config file (`config.yaml` / `config.toml`) — frequencies, gain, talkgroup aliases, scan lists, squelch levels; replaces hard-coded env vars
-- [ ] Multi-dongle support — parallel receive on different bands simultaneously
+- [ ] Config file (`config.yaml` / `config.toml`) — frequencies, gain, talkgroup aliases, scan lists, squelch levels; replaces hard-coded env vars and airband channel list
+- [ ] udev rules — stable USB device aliases so dongle roles don't swap on reboot (critical for multi-dongle setups)
 
 ---
 
 ## Infrastructure (Applies to All Modes)
 
 ### Web Server
-- FastAPI continues to serve all modes from a single process on port 8000
-- Each new mode adds its own WebSocket endpoint(s) and REST routes
+- FastAPI serves all modes from a single process on port 8000
+- Each mode adds its own WebSocket endpoint(s) and REST routes
 - Static frontend served from `frontend/dist` — single React app with tab/page routing per mode
 
 ### Frontend Routing
-- React Router for mode switching: `/` (DMR), `/adsb`, `/aprs`, `/meshtastic`, `/airband`
+- React Router: `/` (Home), `/dmr`, `/adsb`, `/aprs`, `/meshtastic`, `/airband`
 - Persistent nav bar across all pages
 - Each mode is an independently mounted React subtree; disconnects its WebSocket on unmount
 
-### Config File
+### Multi-Dongle Architecture
+Each receive mode owns its own `SDREngine` → `rtl_tcp` subprocess pair. The `SDREngine` `device_index` parameter selects the hardware dongle; `rtl_tcp_port` must be unique per instance.
+
+**udev rules (example — add to `/etc/udev/rules.d/99-rtlsdr.rules`):**
+```
+# Pin dongles by serial number so device indices are stable across reboots
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000001", SYMLINK+="rtlsdr0"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000002", SYMLINK+="rtlsdr1"
+```
+
+Get dongle serial numbers with: `rtl_eeprom -d 0` and `rtl_eeprom -d 1`  
+Set serial numbers with: `rtl_eeprom -d 0 -s 00000001`
+
+### Config File (planned)
 ```yaml
 # config.yaml (planned)
 sdr:
@@ -166,14 +214,20 @@ sdr:
   sample_rate: 2400000
 
 airband:
+  rtl_device: 1
+  rtl_port: 1235
+  gain: 40.0
+  squelch: 0.01
+  dwell_ms: 2000
   frequencies:
     - { freq: 121500000, label: "Guard" }
     - { freq: 123450000, label: "CTAF" }
-  dwell_ms: 2000
-  squelch: 0.02
+    - { freq: 126200000, label: "Center" }
+    - { freq: 132850000, label: "Departure" }
 
 aprs:
   freq: 144390000
+  rtl_device: 2
 
 talkgroups:
   91: "Worldwide"
@@ -183,19 +237,19 @@ talkgroups:
 
 ### Hardware / OS
 - Migrate to Pi 5 (8 GB) before adding ADS-B + APRS simultaneously
-- Blacklist `dvb_usb_rtl28xxu` permanently (`/etc/modprobe.d/rtlsdr.conf`) to prevent USB re-grab
-- Assign each SDR dongle a stable USB alias via udev rules so dongle roles don't swap on reboot
+- Blacklist `dvb_usb_rtl28xxu` permanently (`/etc/modprobe.d/rtlsdr.conf`) to prevent USB re-grab on connect
+- Assign each SDR dongle a stable USB alias via udev rules (see above)
 - `systemd` service per long-running subprocess (`rtl_tcp`, `dump1090`, `direwolf`) with `Restart=on-failure`
 
 ---
 
-## Rough Priority Order
+## Priority Order (updated)
 
-1. Fix DMR audio (blocking for good demo quality)
-2. Systemd + config file (quality of life — stops manual start sessions)
-3. Airband AM (extends the SDR already present; AM demod is a small backend change)
-4. ADS-B (needs second dongle; high visual impact; `dump1090` does all the heavy lifting)
-5. APRS (needs second dongle or time-share; `direwolf` handles decoding)
-6. Meshtastic (needs a Meshtastic USB device; no SDR required)
-7. Talkgroup aliases + RadioID local DB (DMR polish)
-8. Full beta tag
+1. **Fix DMR audio choppiness** — blocking for usable voice monitoring
+2. **Systemd + config.yaml** — quality of life; stops manual env-var sessions, makes channel list editable
+3. **udev rules** — required for stable multi-dongle operation
+4. **ADS-B** — second dongle already planned; `dump1090` does all the heavy lifting; high visual impact
+5. **APRS** — third dongle or time-share; `direwolf` handles decoding
+6. **Meshtastic** — no SDR needed; requires Meshtastic USB device
+7. **Talkgroup aliases + RadioID local DB** — DMR polish
+8. **Full beta tag**
