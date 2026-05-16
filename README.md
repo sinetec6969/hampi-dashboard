@@ -4,10 +4,29 @@
 No cloud. No API keys. Everything runs on-device and serves to any browser on your LAN or Tailscale network.
 
 **Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme  
-**Version:** 0.0.911  
-**Last updated:** 2026-05-15  
+**Version:** 0.1-1_itbegins  
+**Last updated:** 2026-05-16  
 
-> ⚠️ **Audio playback is not yet fully functional.** DMR voice is decoded and streamed correctly, but playback can still be choppy or cut out depending on Pi CPU load. Under active investigation.
+---
+
+## ⚠️ Warnings
+
+### DMR Audio is Choppy
+DMR voice is decoded and streamed correctly, but playback is intermittently choppy on the Pi 4. Root cause is not fully resolved — `dsd-fme` writes AMBE audio in irregular bursts and Pi CPU scheduling jitter compounds the problem. **Do not rely on DMR audio for monitoring-critical use** until this is fixed. Audio tends to be cleaner in the first few minutes of a session; restart the server if it degrades.
+
+### Multiple RTL-SDR Dongles Required for Simultaneous Modes
+Each active receive mode needs its own dongle. You cannot run DMR and airband at the same time on a single dongle.
+
+| Mode | Device | Port |
+|---|---|---|
+| DMR | 0 | 1234 |
+| Airband AM | 1 | 1235 |
+| ADS-B | dedicated (`dump1090`) | — |
+| APRS | 2 (planned) | 1236 |
+
+**Single-dongle workaround:** Set `AIRBAND_RTL_DEV=0` — but you must stop and restart the server to switch between DMR and airband. They conflict at the hardware level.
+
+**udev rules are essential** on multi-dongle setups to keep device indices stable across reboots. Without them, a reboot may swap which dongle is device 0 and device 1. See Setup below.
 
 ---
 
@@ -16,30 +35,28 @@ No cloud. No API keys. Everything runs on-device and serves to any browser on yo
 | Module | Status | Notes |
 |---|---|---|
 | Live waterfall | ✅ Working | 1024-pt FFT, 2.4 MHz span, click-to-tune |
-| DMR decode | ✅ Working | dsd-fme, timeslot/TG/ID/alias |
-| RadioID lookup | ✅ Working | Callsign, name, city/state — 1hr cache |
+| DMR decode | ✅ Working | dsd-fme, timeslot / TG / ID / alias |
+| RadioID lookup | ✅ Working | Callsign, name, city/state — 1 hr cache |
 | Live caller map | ✅ Working | Leaflet, Nominatim geocoding, pins |
 | Call history log | ✅ Working | Persisted JSON, name/location enriched |
 | Memory channels | ✅ Working | localStorage, save/recall/delete |
-| Audio playback | ⚠️ Partial | Decoded and streamed — choppy on Pi |
 | Dashboard home | ✅ Working | Multi-page shell, nav, mode cards |
 | Tailscale access | ✅ Working | Pi Tailscale IP shown on home page |
+| **Airband AM** | ✅ Working | Scanner, squelch, AudioWorklet playback — needs 2nd dongle |
+| DMR audio | ⚠️ Partial | Decoded and streamed — choppy on Pi (see warning above) |
 
 ---
 
 ## Where We're Going
 
-HamPi is building toward a full pre-beta multi-mode RF monitoring station. Planned additions before a stable beta:
-
-- **Airband AM** (118–137 MHz) — AM demod, scanner with named frequency list, squelch-hold. Closest to done — AM demod is a small addition to the existing SDR pipeline.
-- **ADS-B** (1090 MHz) — `dump1090-fa` backend, live aircraft map with altitude colouring and track history. Needs a dedicated second RTL-SDR dongle.
-- **APRS** (144.390 MHz) — `direwolf` TNC, station map with standard APRS symbols, packet log, weather data.
+- **ADS-B** (1090 MHz) — `dump1090-fa` backend, live aircraft map with altitude colouring and track history. Needs a dedicated third RTL-SDR dongle.
+- **APRS** (144.390 MHz) — `direwolf` TNC, station map with standard APRS symbols, packet log, weather data. Fourth dongle or time-share with DMR.
 - **Meshtastic** — LoRa mesh network monitor via USB serial. Node map, text messages, telemetry. No SDR required.
-- **Config file** (`config.yaml`) — replace hard-coded env vars; frequency lists, talkgroup aliases, gain, squelch levels.
+- **Config file** (`config.yaml`) — replace hard-coded env vars and hardcoded channel lists; talkgroup aliases, gain, squelch levels per mode.
 - **Systemd service** — auto-start on boot, restart on failure.
 - **Pi 5 migration** — better compute headroom for simultaneous modes.
 
-See [ROADMAP.md](ROADMAP.md) for full per-mode design notes and priority order.
+See [ROADMAP.md](ROADMAP.md) for full per-mode design notes, known issues, and priority order.
 
 ---
 
@@ -59,36 +76,48 @@ See [ROADMAP.md](ROADMAP.md) for full per-mode design notes and priority order.
 - **Memory channels** — persistent channel bank (localStorage); save any frequency/gain with a name, recall with one tap
 
 ### DMR Decode
-- DSD (Digital Speech Decoder) decodes DMR/MOTOTRBO frames
+- `dsd-fme` decodes DMR/MOTOTRBO frames from FM-demodulated PCM
 - Sync indicator goes green on active voice traffic
 - Per-frame display: timeslot, frame type (VOICE/TLC/MBC/DATA), error count
-- Active call info: timeslot, talkgroup, source ID
+- Active call info: timeslot, talkgroup, source ID, talker alias
 - RadioID.net lookup for DMR IDs (callsign, name, city, state) — cached 1 hour
+- Call history: persisted log of all completed calls with duration and enriched metadata
+
+### Airband AM Reception
+- AM demodulation pipeline: IQ → frequency shift → decimate 2.4 MHz→48 kHz → envelope detection → 3.5 kHz LPF → AGC → int16 PCM
+- Channel scanner: cycles a named frequency list (Guard, CTAF, Center, Departure) with configurable dwell time
+- Squelch: holds on active channel while audio RMS exceeds threshold; 1 s hang after signal drops; only streams audio when squelch is open (no noise between transmissions)
+- AudioWorklet playback — same pipeline as DMR, 48 kHz input rate
+- Frequency list panel with active channel highlight and RX indicator; click any channel to lock to it
+- Squelch slider and scanner on/off toggle in the UI
 
 ### Audio Playback
-- Decoded DMR voice streamed via WebSocket to Web Audio API
-- 8 kHz mono PCM (dsd-fme AMBE output), scheduled playback with underrun detection
+- Decoded voice streamed via WebSocket to Web Audio API
+- AudioWorklet path (secure context) for gapless real-time playback; scheduled `AudioBufferSourceNode` fallback for plain HTTP
+- DMR audio: 8 kHz mono PCM from dsd-fme; Airband audio: 48 kHz mono PCM from AM demodulator
 
 ### Live Caller Map
 - Mercator world map (CartoDB Dark Matter tiles — no API key required)
-- Each heard DMR ID is geocoded via Nominatim OSM and pinned with a glowing green dot
+- Each heard DMR ID geocoded via Nominatim OSM and pinned with a glowing green dot
 - Click any pin for callsign, name, city/state, DMR ID, timeslot, talkgroup, and QRZ link
-- Geocoding cached permanently in memory; RadioID lookups cached 1 hour
+- Geocoding cached permanently; RadioID lookups cached 1 hour
 
 ---
 
 ## Hardware Requirements
 
 - Raspberry Pi 4 (4 GB recommended) or Pi 5
-- RTL-SDR Blog V4 dongle (or compatible RTL2832U device)
+- RTL-SDR dongle(s) — RTL-SDR Blog V4 or compatible RTL2832U device
+  - 1 dongle: DMR only (or airband only — not simultaneous)
+  - 2 dongles: DMR + airband simultaneously ← current recommended setup
+  - 3+ dongles: adds ADS-B and/or APRS (planned)
 
 ## Software Dependencies
 
 - Python 3.11+, `uvicorn`, `fastapi`, `numpy`, `scipy`, `httpx`
 - Node 18+, Vite, React 19, `leaflet`, `react-leaflet`
 - `dsd-fme` — must be in `$PATH`
-- `rtl_tcp`, `rtl_fm` from `rtl-sdr` package
-- `stdbuf` (GNU coreutils — almost always pre-installed)
+- `rtl_tcp` from `rtl-sdr` package
 
 ## Setup
 
@@ -102,210 +131,207 @@ pip install -r requirements.txt
 cd ../frontend
 npm install
 npm run build          # builds dist/ served by FastAPI at :8000
-# OR: npm run dev -- --host   # Vite dev server at :5173
 ```
 
-## Starting Services
+### Free the RTL-SDR from the kernel DVB driver
 
-On first boot, the kernel DVB driver may claim the RTL-SDR device. Free it once:
+On first boot the kernel DVB driver may claim the device. Free it once:
 
 ```bash
-echo "1-1.4" | sudo tee /sys/bus/usb/drivers/usb/unbind
-sleep 2
-echo "1-1.4" | sudo tee /sys/bus/usb/drivers/usb/bind
+echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/rtlsdr.conf
+sudo modprobe -r dvb_usb_rtl28xxu 2>/dev/null; true
 ```
 
-> Find your device's USB path with `ls /sys/bus/usb/devices/` and check `idVendor` for `0bda`.
+Or for a one-time unbind without blacklisting:
+```bash
+echo "1-1.4" | sudo tee /sys/bus/usb/drivers/usb/unbind
+```
+Find your USB path with `ls /sys/bus/usb/devices/` — look for `idVendor=0bda`.
 
-Then start the backend — it manages `rtl_tcp` internally:
+### udev rules for stable device indices (multi-dongle)
+
+Without udev rules, dongles can swap device indices on reboot. Pin them by serial number:
+
+```bash
+# Get serial numbers (run for each dongle index 0, 1, 2…)
+rtl_eeprom -d 0
+rtl_eeprom -d 1
+
+# Set serial numbers if they're blank or colliding
+rtl_eeprom -d 0 -s 00000001
+rtl_eeprom -d 1 -s 00000002
+
+# Create the rules file
+sudo tee /etc/udev/rules.d/99-rtlsdr.rules <<'EOF'
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000001", SYMLINK+="rtlsdr0"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000002", SYMLINK+="rtlsdr1"
+EOF
+
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+### Start the server
+
+The backend manages `rtl_tcp` subprocesses internally:
 
 ```bash
 cd backend && source venv/bin/activate
+
+# Single dongle (DMR only, airband disabled or on same device)
+AIRBAND_ENABLE=0 uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Two dongles (DMR on device 0, airband on device 1)
 uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Single dongle, airband only (no DMR)
+SDR_FREQ=121500000 AIRBAND_RTL_DEV=0 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Open `http://<pi-ip>:8000/` in a browser (or `:5173` if using the Vite dev server).
+Open `http://<pi-ip>:8000/` in a browser.
+
+### Airband configuration
+
+| Env var | Default | Notes |
+|---|---|---|
+| `AIRBAND_ENABLE` | `1` | Set to `0` to disable the scanner entirely |
+| `AIRBAND_RTL_DEV` | `1` | RTL-SDR device index for airband |
+| `AIRBAND_RTL_PORT` | `1235` | `rtl_tcp` port for airband |
+| `AIRBAND_GAIN` | `40.0` | Tuner gain in dB |
+| `AIRBAND_SQUELCH` | `0.01` | Audio RMS threshold — increase if noise triggers squelch |
+| `AIRBAND_DWELL_MS` | `2000` | Ms per channel when scanning |
 
 ---
 
 ## Troubleshooting
 
 ### `usb_claim_interface error -6` / `Failed to open rtlsdr device`
-Kernel DVB driver is holding the device. Run the USB unbind/bind commands above. To make this permanent so you never have to do it again:
-```bash
-echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/rtlsdr.conf
-```
+Kernel DVB driver is holding the device. Run the blacklist command in Setup above.
 
-### Waterfall / DMR WebSocket errors in browser console
-The browser was loading a stale built frontend. Hard-refresh (`Ctrl+Shift+R`) or rebuild:
+### Airband scanner starts but no audio
+1. Check `AIRBAND_RTL_DEV` — default is device 1. If you only have one dongle, set `AIRBAND_RTL_DEV=0` (but stop DMR first or it will conflict).
+2. Try increasing `AIRBAND_SQUELCH=0.05` — if noise floor is high it may be blocking the squelch from opening.
+3. Check the server log for `AirbandScanner started` — if it says `AirbandScanner failed to start` the dongle at that device index wasn't found.
+
+### Two dongles but airband and DMR interfere / crash
+Both are trying to open the same device index. Verify the device indices with `rtl_test -d 0` and `rtl_test -d 1`. Set udev rules (see Setup) to pin serial numbers.
+
+### Waterfall / WebSocket errors in browser console
+Stale frontend build. Hard-refresh (`Ctrl+Shift+R`) or rebuild:
 ```bash
 cd frontend && npm run build
 ```
 
-### DMR sync dot stays grey even on an active channel
-Two known root causes fixed in v0.0.3:
-1. **DSD output buffering** — DSD batches its stdout in an 8 KB pipe buffer, so frames arrived seconds late (or never if the transmission ended first). Fixed with `stdbuf -oL`.
-2. **DSD writes metadata to stdout, not stderr** — the backend was reading the wrong file descriptor. Fixed by rewriting the DMR reader to split text lines from binary audio on stdout.
-
-### DMR decode shows wrong timeslot
-DSD prints both slots on every line, e.g. `[SLOT0]  slot1`. The regex was matching the inactive `slot1` label. Fixed in v0.0.3 by requiring brackets around the active slot.
+### DMR sync dot stays grey on an active channel
+Two root causes fixed in v0.0.3: DSD output buffering (fixed with `stdbuf -oL`) and DSD writing metadata to stdout instead of stderr (fixed by rewriting the stream reader).
 
 ### SDR loop crashes and waterfall goes blank
-If `rtl_tcp` drops the connection, the SDR loop now automatically reconnects after 3 seconds (fixed v0.0.3).
-
-### Tune button shows "Error"
-Usually means the SDR connection is broken. The backend now returns HTTP 503 with a message instead of a raw 500. Refresh the page — the SDR loop will have reconnected by then.
+`rtl_tcp` dropped the connection. The SDR loop auto-reconnects after 3 seconds. If it persists, restart the server.
 
 ---
 
 ## Architecture
 
 ```
-RTL-SDR dongle
-    └── rtl_tcp (managed by backend, 127.0.0.1:1234)
-            └── SDREngine (Python)
-                    ├── FFT ×4 → ws/waterfall → browser canvas
-                    └── FM demodulate → PCM 48kHz (thread executor, pipelined)
+Dongle 0 (DMR, ~440 MHz)
+    └── rtl_tcp :1234
+            └── SDREngine (device_index=0)
+                    ├── FFT ×4 → /ws/waterfall → browser canvas
+                    └── fm_demodulate → PCM 48 kHz
                             └── DMRDecoder (dsd-fme)
-                                    ├── stderr text → DMRFrame → ws/dmr → browser
-                                    │       └── src_id → /api/lookup → RadioID.net + Nominatim
-                                    │                                    └── lat/lon → MapPanel pins
-                                    └── WAV file (stereo 8kHz) → buf → mix mono → pace → ws/audio → AudioWorklet
+                                    ├── stderr → DMRFrame → /ws/dmr → browser
+                                    │       └── src_id → RadioID.net + Nominatim → MapPanel
+                                    └── WAV (stereo 8 kHz) → mix mono → pace → /ws/audio → AudioWorklet
+
+Dongle 1 (Airband, 118–137 MHz)
+    └── rtl_tcp :1235
+            └── SDREngine (device_index=1)
+                    └── am_demodulate → PCM 48 kHz (gated by squelch)
+                            └── AirbandScanner
+                                    ├── channel scanner (dwell / hold / hang)
+                                    ├── squelch gate (audio RMS threshold)
+                                    └── PCM + status → /ws/airband → AudioWorklet + freq list UI
 ```
 
 ---
 
 ## Version History
 
+### 0.1-1_itbegins — 2026-05-16
+- **Airband AM scanner** — full implementation replacing the placeholder page.
+  - `backend/airband.py` (new): `AirbandScanner` class — owns an independent `rtl_tcp` instance on device 1/port 1235; cycles a channel list with configurable dwell time; squelch based on audio RMS with 1 s hang after signal drops; gated audio output (PCM only streamed when squelch open).
+  - `backend/sdr.py`: `am_demodulate()` method (IQ → freq shift → decimate 2.4 MHz→48 kHz → `abs()` envelope → 3.5 kHz LPF → DC remove → AGC → int16 PCM); `device_index` param wired to `rtl_tcp -d` flag.
+  - `backend/main.py`: `/ws/airband` WebSocket (mixed binary PCM + JSON status frames); REST endpoints `GET /api/airband/status`, `POST /api/airband/squelch`, `POST /api/airband/scan`, `POST /api/airband/channel/{idx}`; scanner integrated into lifespan with graceful fallback if device not found.
+  - `frontend/src/pages/AirbandPage.tsx`: frequency list with active-channel highlight and RX blink animation, AudioWorklet audio player at 48 kHz, squelch slider, scanner toggle, setup hint when dongle not available.
+  - `frontend/src/components/AudioPlayer.tsx`: parametrized with `wsPath`, `inputRate`, `label` props (defaults preserve DMR behaviour); binary-only guard on `onmessage` to ignore JSON status frames.
+- **ROADMAP.md**: airband marked ✅; DMR audio choppiness warning added; multi-dongle warning with device/port table, udev rules documentation, and single-dongle workaround; priority list updated.
+- **README**: warnings section added (DMR audio, multi-dongle); airband added to feature table; architecture diagram updated; setup section expanded with udev rules and airband env var reference.
+
 ### 0.0.911 — 2026-05-15
-- **README rewrite** — new "What's Built" status table and "Where We're Going" roadmap summary added to top of README; reflects current working state and pre-beta target feature set.
-- **GitHub repo description updated** — description and homepage URL updated to reflect multi-mode scope.
+- README rewrite — new "What's Built" status table and "Where We're Going" roadmap summary; reflects current working state and pre-beta target feature set.
+- GitHub repo description updated to reflect multi-mode scope.
 - No code changes from 0.0.9_DASHBOARDASSEMBLE.
 
 ### 0.0.9_DASHBOARDASSEMBLE — 2026-05-15
-- **Home page** — landing page at `/` with mode cards for all five dashboard modes (DMR live, ADS-B / APRS / Meshtastic / Airband as coming-soon). Each card shows status badge, description, and navigates to the mode page on click.
-- **Multi-page routing** — `react-router-dom` v6 added; `BrowserRouter` wraps the app; `NavLink`-based top nav bar (40px) persists across all pages with active-link highlight.
-- **Per-mode pages** — `/dmr`, `/adsb`, `/aprs`, `/meshtastic`, `/airband`. DMR page is the full existing dashboard; the four coming-soon pages list planned features and hardware requirements with a link to ROADMAP.md.
-- **System info** — `GET /api/sysinfo` returns hostname, local LAN IP, Tailscale IP (via `tailscale ip -4`), and version string. Displayed in the home page hero section so both local and Tailscale access URLs are immediately visible.
-- **Tailscale access** — no server-side changes required; Tailscale provides the Pi a stable `100.x.x.x` IP accessible from any enrolled device. The Tailscale IP is surfaced on the home page.
+- **Home page** — landing page at `/` with mode cards for all five dashboard modes.
+- **Multi-page routing** — `react-router-dom` v6; `NavLink`-based top nav bar persists across all pages.
+- **Per-mode pages** — `/dmr`, `/adsb`, `/aprs`, `/meshtastic`, `/airband`. DMR page is the full existing dashboard; coming-soon pages list planned features.
+- **System info** — `GET /api/sysinfo` returns hostname, local LAN IP, Tailscale IP, and version string. Displayed on the home page hero.
 
 ### 0.0.8-1_THEYMISSEDTHEBARN — 2026-05-14
-- **ROADMAP.md added** — full pre-beta roadmap covering ADS-B, APRS, Meshtastic, and airband AM reception, each with backend/frontend design notes. Includes hardware migration path (Pi 4 → Pi 5), multi-dongle strategy, planned `config.yaml`, systemd service targets, and priority order through beta.
-- **`.gitignore` updated** — `call_history.json` and `recordings/` excluded from version control (runtime data).
+- **ROADMAP.md added** — full pre-beta roadmap covering ADS-B, APRS, Meshtastic, and airband AM reception.
+- **`.gitignore` updated** — `call_history.json` and `recordings/` excluded.
 
 ### 0.0.8_stormtrooper — 2026-05-14
-- **Call history panel** — persistent log of all completed DMR calls, displayed in a dedicated right-side column. Each entry shows time, duration, talkgroup, callsign, full name, and city/state from RadioID.net. History is written to `call_history.json` on disk and survives restarts (200-call rolling window). New calls broadcast live to the browser via the existing `/ws/dmr` WebSocket as `type: "call_record"` frames.
-- **Call detection** — call start triggered on first VC* frame with a non-zero `src_id`; call end triggered by the VLC header of the next transmission (`_clear_call`). Prevents duplicate entries mid-transmission that were previously caused by the 300 ms silence-gap finalizer firing between DMR audio bursts.
-- **RadioID enrichment at call-end** — `on_call_end` awaits `_lookup_dmr_id()` before logging, so name/location are always present in the stored record. Lookup hits the existing 1-hour in-memory cache; no extra network requests when the DMR panel has already resolved the ID.
-- **Layout: two-column** — all signal panels (waterfall, DMR, contacts, audio, map) moved to a left flex column; call history occupies a fixed 340 px right column, full viewport height, independently scrollable.
-- **Audio: pre-buffer increased** — `PACE_AHEAD` raised 100 ms → 500 ms so the backend keeps 500 ms of decoded PCM queued in the WebSocket pipe before throttling. Reduces underruns caused by Pi CPU scheduling jitter.
-- **Audio: worklet re-prime removed** — AudioWorklet was resetting `_primed = false` every time the queue drained between DMR frame bursts (~every 100 ms), forcing a fresh 150 ms accumulation before each resume. Worklet now outputs silence during gaps and resumes immediately when data arrives.
-- **Audio: worklet initial buffer raised** — target raised 150 ms → 500 ms to match the new pre-buffer depth.
+- **Call history panel** — persistent log of all completed DMR calls with time, duration, TG, callsign, name, city/state. Persisted to `call_history.json`, 200-call rolling window.
+- **Call detection** — start on first VC* frame with non-zero `src_id`; end on next VLC header.
+- **RadioID enrichment at call-end** — name/location always present in stored record.
+- **Two-column layout** — signal panels in left flex column; call history in fixed 340 px right column.
+- **Audio: PACE_AHEAD raised** 100 ms → 500 ms; worklet re-prime removed; initial buffer raised 150 ms → 500 ms.
 
 ### 0.0.6_th3d3vi1 — 2026-05-13
-- **Waterfall click/touch-to-tune** — clicking or tapping anywhere on the waterfall canvas immediately tunes to that frequency. Mouse hover draws a green vertical crosshair with a floating frequency label (flips side at centre so it never clips the edge); touch fires the tune directly. Frequency calculated as `centerFreq + (x/width − 0.5) × 2.4 MHz`, rounded to the nearest Hz, and POSTed to `/api/tune`.
-- **Memory channels** — a persistent channel bank bar sits between the header and the waterfall. Click `+ Save` to name and store the current frequency and gain; clicking any channel pill instantly recalls and tunes to it; `×` deletes. Channels are saved to `localStorage` (`hampi-memory-channels`) so they survive page reloads and browser restarts.
-- **State lifted to App** — `freq` and `gain` now live in `App.tsx` with a single `tuneTo(f, g)` function as the sole path to the tune API. Controls, MemoryChannels, and the waterfall click handler all call through it, so the header frequency display, Controls inputs, and memory bar are always in sync regardless of which control initiated the tune.
+- **Waterfall click/touch-to-tune** — click or tap tunes to that frequency instantly.
+- **Memory channels** — persistent channel bank (localStorage); save/recall/delete frequency+gain presets.
+- **State lifted to App** — `freq`/`gain` in `App.tsx`; single `tuneTo(f, g)` path keeps all controls in sync.
 
 ### 0.0.6_thedarkphoenixrises — 2026-05-13
-- **Fix: Audio completely silent after AudioWorklet introduction** — `AudioWorklet.addModule()` is blocked on plain HTTP from non-`localhost` origins (browser treats it as an insecure context). The rejection was synchronous, React 18 batched `'connecting'` → `'stopped'` into a single render cycle, and the Start button appeared to do nothing. Fixed with a two-path player: checks `window.isSecureContext` first; on HTTPS/localhost uses the AudioWorklet (dedicated real-time audio thread, gapless, linear-interp resampled); on plain HTTP falls back to scheduled `AudioBufferSourceNode` which works on any origin. The active path (`AudioWorklet` or `scheduled`) is shown in the panel. Added `ctx.resume()` on both paths and visible error display so failures are never silent.
+- **Fix: Audio silent on non-localhost HTTP** — `AudioWorklet.addModule()` blocked on plain HTTP. Two-path player: AudioWorklet on secure contexts, scheduled `AudioBufferSourceNode` fallback on plain HTTP.
 
 ### 0.0.5-2FIXEDPHOENIX — 2026-05-12
-- **Fix: DMRPanel active call freezes after ~5 minutes** — `lastSrcRef` was set on first contact and never reset between transmissions. When the same caller keyed up again: the VLC header frame has `src_id=0` (backend calls `_clear_call`), which is falsy, so the `if (f.src_id && ...)` guard short-circuited and `lastSrcRef` stayed at the old value. Subsequent VC\* frames with the same src_id then failed the `!== lastSrcRef` check, so `setActiveSrc`, `setLookup`, and the RadioID fetch never fired. Contacts and Map were unaffected because they update `lastSeen` on every VOICE frame without a src_id guard. Fix: on VLC frame (`src_id === 0`) reset `lastSrcRef` to 0 and clear `activeAlias` so the next VC\* frame — even from a repeat caller — is always treated as a new call.
+- **Fix: DMR panel active call freezes** — `lastSrcRef` never reset between transmissions; same caller on re-key failed the `!== lastSrcRef` guard. Fixed by resetting to 0 on VLC frame.
 
 ### 0.0.5-1WORKINGPHOENIX — 2026-05-12
-- **Fix: FM demodulation channel filter was ineffective** — the 64-tap FIR applied at 2.4 MHz had only −0.7 dB attenuation at the adjacent DMR channel (12.5 kHz). Adjacent channels bled straight through, corrupting the 4-FSK symbol decisions and causing near-constant `FLCO FEC ERR` in dsd-fme. Moved the LPF to 48 kHz (post-decimation) where the same 64 taps give −72 dB at 12.5 kHz. Also eliminated `oaconvolve` entirely — lfilter on 2,621 samples at 48 kHz takes 1.1 ms vs 46 ms at 2.4 MHz, giving 53 ms of headroom per chunk.
-- **Fix: Partial WAV reads caused irregular chunk sizes** — dsd-fme writes AMBE audio in 640-byte frame bursts; reading 3,200 bytes at a time would often return partial chunks of unpredictable size. The browser's Web Audio scheduler received buffers of varying duration (60 ms, 80 ms, 100 ms …) making gapless scheduling impossible. WAV reader now accumulates raw stereo bytes in a bytearray and only emits complete fixed-size chunks. Silence gap > 300 ms discards any partial buffer and resets pacing so long quiet periods don't corrupt timing.
-- **Fix: Audio playback replaced with AudioWorklet** — `AudioBufferSourceNode.start(scheduledTime)` relies on the JS main thread for scheduling; on a Pi running SDR processing simultaneously, GC/CPU pressure causes 5–15 ms slips that produce audible gaps at every buffer boundary. Replaced with an `AudioWorklet` (`audio-processor.js`) that runs in a dedicated real-time audio thread: `process()` fires every 128 samples regardless of main-thread congestion, drains a sample queue, and fills silence during underruns. Main thread resamples 8 kHz → native context rate with linear interpolation before zero-copy transfer to the worklet. Primes with 150 ms of audio before opening output to hide initial jitter.
+- **Fix: FM demodulation channel filter ineffective** — 64-tap FIR at 2.4 MHz gave −0.7 dB at 12.5 kHz. Moved LPF to 48 kHz (post-decimation) where same taps give −72 dB. 53 ms headroom per chunk.
+- **Fix: Irregular WAV chunk sizes** — `dsd-fme` writes 640-byte bursts; reader now accumulates into a bytearray and emits fixed-size chunks only.
+- **Fix: Audio playback replaced with AudioWorklet** — dedicated real-time audio thread; gapless; linear-interp resample from 8 kHz.
 
 ### 0.0.5_WORLDWIDEBBY — 2026-05-11
-- **Live caller map** — Mercator world map using CartoDB Dark Matter tiles (free, no API key, dark-themed) rendered with react-leaflet. Each unique DMR ID heard is geocoded via Nominatim OSM and plotted as a glowing green pin. Clicking a pin shows callsign, name, city/state, DMR ID, timeslot, talkgroup, and a direct QRZ link.
-- **Geocoding pipeline** — `/api/lookup` extended to call Nominatim after RadioID.net; resolves city+state+country to lat/lon. Results cached permanently in `_geo_cache` (city locations don't change), independent of the 1-hour RadioID TTL. Frontend only plots pins when lat/lon are present; contacts without a resolvable location appear in the Contacts panel only.
-- **Map layout** — map panel occupies all remaining vertical space below the waterfall and control panels via `flex:1`, scaling naturally with window height.
+- **Live caller map** — CartoDB Dark Matter tiles, Nominatim geocoding, glowing pins, callsign popups.
 
-### 0.0.4-3_phoenixroseagain — 2026-05-10
-- **Fix: Waterfall extremely slow** — `lfilter` (direct FIR convolution) at 2.4 MHz sample rate was running at 2.4× slower than real-time on the Pi, causing a growing socket buffer backlog and ~5 fps waterfall. Replaced with `oaconvolve` (overlap-add FFT convolution), which is 3× faster and keeps up with the data rate. Added overlap-save state (`_lpf_tail`) so the filter has correct history at every chunk boundary — no startup transient between chunks.
-- **Fix: 4 FFT frames per chunk** — was computing one waterfall line per IQ read (every ~100 ms = ~10 fps). Now spreads 4 FFT slices across each chunk, giving 40–87 waterfall lines/sec depending on buffer state.
-- **Fix: Audio choppy / underruns** — two root causes. (1) Sequential read→demod loop fed dsd-fme at 0.54× real-time: pipelined read_iq and fm_demodulate to run concurrently in the thread executor, so dsd-fme now receives audio at real-time rate. (2) WAV reader sent chunks in bursts whenever dsd-fme had buffered output, causing the browser's Web Audio scheduler to jump far ahead then stall. Added server-side pacing: tracks audio-time sent vs wall clock, sleeps when more than 100 ms ahead, resets reference on every silence gap so long pauses don't corrupt timing.
-- **Browser audio buffer** — initial jitter buffer raised 200 ms → 500 ms; underrun reset also raised to 500 ms ahead, absorbing burst/gap transitions at transmission start.
-
-### 0.0.4-2_phoenixrising — 2026-05-09
-- **Fix: DMR contacts never populated** — `VC*` (Voice Continuation) frames were mapped to `UNKNOWN` instead of `VOICE` because `_map_ftype` stripped the trailing `*` before checking the map key `'VC*'`. The VLC header frame (correctly typed VOICE) has src_id=0 from `_clear_call`; all subsequent frames with the real src_id were `UNKNOWN`. Frontend filters on `frame_type === 'VOICE'` so no RadioID lookup ever fired and the Contacts panel stayed empty.
-- **Fix: Audio played at half speed** — dsd-fme `-w` outputs stereo WAV (TS1 left, TS2 right) at 8 kHz. The WAV reader was sending raw stereo bytes; the frontend and STT both treated them as mono, so 800 stereo frames (100 ms) were interpreted as 1600 mono samples (200 ms) — exactly 0.5× speed. WAV reader now mixes L+R to mono before broadcasting.
-- **Fix: Waterfall latency / choppiness** — `fm_demodulate` (64-tap FIR over 131072 samples) ran in the asyncio event loop, blocking it for ~30 ms every 55 ms cycle. Moved to thread executor; event loop now free to dispatch WebSocket frames promptly throughout the read+demodulate cycle.
-- **Removed STT** — faster-whisper speech-to-text removed for now; `stt.py` preserved on disk for future reimplementation.
-
-### 0.0.4-1_dsdfmehatesme — 2026-05-08
-- **Switch decoder: dsd → dsd-fme** — original DSD never output LC header data (src/dst IDs) to any accessible stream; dsd-fme outputs structured metadata to stderr including talkgroup, DMR ID, talker alias, and color code
-- **DMR IDs and talkgroups now decode correctly** — `TGT=X SRC=Y` parsed from dsd-fme stderr
-- **Timeslot fix** — dsd-fme correctly identifies TS1/TS2; stopped LC lines from overriding the slot detected in BS-mode bracket notation (`[slot2]`); slots now correctly show TS2 for TS2 traffic
-- **Talker alias cleanup** — strips ` DMR ID` suffix and trailing bare DMR ID numbers that some radios append; alias assembled incrementally across dsd-fme blocks and never replaced by a shorter/partial block
-- **Alias cleared on new call** — VLC (Voice LC Header) now resets slot context so a previous caller's name doesn't persist into the next transmission
-- **New Contacts panel** — accumulates callers heard this session, each callsign links directly to `qrz.com/db/{callsign}`; falls back to RadioID.net lookup when no talker alias is broadcast
-- **Dashboard script** — `dashboard` now builds the frontend and serves everything through FastAPI on port 8000; eliminates Vite dev server and its WebSocket proxy race condition (no more port 5173)
-- **Waterfall fix** — replaced self-copy `drawImage(canvas → itself)` with ping-pong double buffer; debounced ResizeObserver to prevent infinite layout loop that was crashing Firefox on Pi
-- **AudioPlayer sample rate** — fixed 6× pitch error; context stays at 48 kHz for hardware compatibility, buffer declared at 8 kHz (dsd-fme AMBE output rate) so browser resamples correctly
-- **FM LPF tightened** — cutoff 15 kHz → 6 kHz for 12.5 kHz DMR channel; reduces adjacent channel noise into the demodulator
-
-### 0.0.3_all_ur_base_r_belong_to_us — 2026-05-07
-- **Fix: DMR audio never reached STT** — DSD's portaudio backend cannot write decoded PCM to a subprocess socket pipe (`-o -` silently dropped all audio). Switched to `-n -w /tmp/dsd_audio.wav`: DSD writes decoded audio to a WAV file via standard file I/O, which works correctly. Backend streams PCM from the file continuously.
-- **Fix: Timeslot displayed as TS0/TS1** — DSD uses 0-indexed slots (SLOT0/SLOT1); DMR convention is TS1/TS2. Frontend now displays `timeslot + 1`.
-- **Fix: DSD stderr now captured** — previously discarded (`DEVNULL`); now piped and logged to `/tmp/dsd_stderr.log` for LC header debugging.
-- **Fix: DSD stdout is now pure text** — removed the binary/text stream-splitter entirely now that audio travels on a separate path. `_read_stdout` uses `readline()` cleanly.
-- **STT energy thresholds lowered** — `ENERGY_START` 600 → 300, `ENERGY_HOLD` 200 → 100. AMBE vocoder decoded audio has lower RMS than natural speech; old thresholds were gating out real voice.
-- **Improved LC regex coverage** — added patterns for DSD's `CC: X SLOT: X SRC: X DST: X GRP: X` and `mfid:` formats; ANSI escape codes stripped before parsing.
-- **Audio flow diagnostics** — STT logs chunk count, max RMS, and voice-active state every 500 chunks so audio health is visible in the backend log.
-
-### 0.0.3 — th3r3i5n0g0d — 2026-05-06
-- Fixed `local_files_only=True` on Whisper model load (prevented IPv6 Hugging Face timeout on Pi)
-- Fixed DSD output buffering with `stdbuf -oL`
-- Fixed DMR sync dot — text/binary stream splitter on DSD stdout
-- Fixed timeslot regex — require brackets around active slot label
-- SDR loop auto-reconnects on `rtl_tcp` drop
-- Tune endpoint returns HTTP 503 instead of 500 on SDR error
-
-### 0.0.2 — Initial public release — 2026-05-04
-- FastAPI backend, React/Vite frontend
-- Live waterfall (1024-point FFT, WebSocket)
-- DMR decode via DSD, frame metadata over WebSocket
-- DSD audio playback via Web Audio API
-- faster-whisper STT with dual VAD (DMR frame + energy)
-- RadioID.net lookup with 1-hour cache
-- Tune control (frequency + gain)
+### Earlier versions
+See full changelog in [previous README entries](https://github.com/sinetec6969/hampi-dashboard/commits/master) for 0.0.4-x, 0.0.3, and 0.0.2.
 
 ---
 
 ## Version 1.0 Roadmap
 
 ### Signal & Decoding
-- [ ] Multi-channel scanning — hop between a list of frequencies, dwell on active ones
-- [ ] P25 Phase 1 & 2 support (DSD already handles it, needs routing)
-- [ ] NXDN / D-STAR decode modes
-- [ ] Trunked DMR system support (control channel parsing, follow traffic)
-- [ ] Signal strength meter and SNR display on the waterfall
-- [x] Click-to-tune on the waterfall canvas
+- [ ] ADS-B live aircraft map (`dump1090-fa`, third dongle)
+- [ ] APRS decode (`direwolf`, fourth dongle or DMR time-share)
+- [ ] Meshtastic node monitor (USB serial, no SDR)
+- [ ] Trunked DMR system support (control channel parsing)
+- [ ] P25 Phase 1 & 2, NXDN, D-STAR
 
 ### Audio
-- [ ] Audio recording — save decoded voice to timestamped WAV files per call
+- [ ] Fix DMR audio choppiness (highest priority)
+- [ ] Audio recording — save decoded voice to timestamped WAV per call
 - [ ] Per-talkgroup squelch and mute
-- [ ] Volume control in the UI
+- [ ] Volume control slider
+
+### Configuration & Infrastructure
+- [ ] `config.yaml` — frequencies, channel lists, talkgroup aliases, squelch levels
+- [ ] Systemd service file for auto-start on boot
+- [ ] udev rules generator in setup script
 
 ### DMR Intelligence
-- [ ] Full RadioID.net database import for offline ID lookups (no API rate limits)
-- [x] Call history log — persist calls with timestamp, duration, TG, ID, transcript
-- [ ] Talkgroup alias file (CSV import — map TG numbers to friendly names)
-- [ ] DTMF and MDC-1200 decode for analog channels
-
-### STT & AI
-- [ ] Whisper small/medium model option (better accuracy, more Pi RAM required)
-- [ ] GPU acceleration on Pi 5 / external accelerator
-- [ ] Keyword alert — notify when specific words appear in transcripts
-- [ ] Transcript export (JSON / CSV / plain text)
-
-### Infrastructure
-- [ ] Systemd service file for auto-start on boot
-- [ ] Config file (YAML/TOML) for frequencies, talkgroup aliases, STT model, gain
-- [ ] Multi-dongle support (parallel receive on different bands)
-- [ ] WebRTC audio option for lower-latency playback
-- [ ] Docker container for easy deployment
-- [ ] Dark/light theme toggle
+- [ ] Talkgroup alias CSV import (map TG numbers to friendly names)
+- [ ] Full RadioID.net database import for offline ID lookups
