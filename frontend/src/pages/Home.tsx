@@ -34,10 +34,18 @@ const MODES: ModeCard[] = [
     icon: '🛩',
     title: 'Airband AM',
     subtitle: 'VHF 118–137 MHz',
-    description: 'Receive VHF airband voice with AM demodulation. Scanner mode cycles a configurable frequency list and holds on squelch break.',
-    status: 'coming-soon',
+    description: 'AM demodulation with channel scanner. Cycles Guard, CTAF, Center, and Departure — holds on squelch break. Requires a second RTL-SDR dongle.',
+    status: 'live',
     color: '#44ccff',
-    hardware: 'RTL-SDR (shared or dedicated)',
+  },
+  {
+    path: '/meshtastic',
+    icon: '🕸️',
+    title: 'Meshtastic',
+    subtitle: 'LoRa Mesh Network',
+    description: 'Live mesh monitor via USB serial. Node map, text messages, battery and telemetry. Auto-connects to any attached Meshtastic device.',
+    status: 'live',
+    color: '#aa66ff',
   },
   {
     path: '/adsb',
@@ -47,7 +55,7 @@ const MODES: ModeCard[] = [
     description: 'Live aircraft map from 1090 MHz transponder broadcasts. Altitude, speed, heading, squawk, and track history.',
     status: 'coming-soon',
     color: '#4488ff',
-    hardware: 'Dedicated RTL-SDR + dump1090-fa',
+    hardware: 'RTL-SDR + dump1090-fa',
   },
   {
     path: '/aprs',
@@ -58,16 +66,6 @@ const MODES: ModeCard[] = [
     status: 'coming-soon',
     color: '#ff8844',
     hardware: 'RTL-SDR + direwolf',
-  },
-  {
-    path: '/meshtastic',
-    icon: '🕸️',
-    title: 'Meshtastic',
-    subtitle: 'LoRa Mesh Network',
-    description: 'Monitor a Meshtastic LoRa mesh — node positions, text messages, telemetry, and battery status.',
-    status: 'coming-soon',
-    color: '#aa66ff',
-    hardware: 'Meshtastic USB device',
   },
 ]
 
