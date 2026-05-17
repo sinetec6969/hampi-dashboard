@@ -32,6 +32,7 @@ from starlette.websockets import WebSocketState
 
 from airband import AirbandScanner, DEFAULT_CHANNELS
 from dmr import DMRDecoder
+from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -58,6 +59,10 @@ HISTORY_FILE:   str   = os.getenv("HISTORY_FILE",
                                    os.path.join(os.path.dirname(__file__), "..", "call_history.json"))
 MAX_HISTORY:    int   = 200
 
+# Meshtastic configuration
+MESH_ENABLE: bool          = os.getenv("MESH_ENABLE", "1") == "1"
+MESH_PORT:   Optional[str] = os.getenv("MESH_PORT")   # None = auto-detect
+
 # Airband configuration
 AIRBAND_ENABLE:  bool  = os.getenv("AIRBAND_ENABLE", "1") == "1"
 AIRBAND_RTL_DEV: int   = int(os.getenv("AIRBAND_RTL_DEV",  "1"))
@@ -71,12 +76,14 @@ AIRBAND_DWELL:   int   = int(os.getenv("AIRBAND_DWELL_MS", "2000"))
 # ---------------------------------------------------------------------------
 sdr:     SDREngine
 decoder: DMRDecoder
-airband: Optional[AirbandScanner] = None
+airband:   Optional[AirbandScanner]    = None
+meshtastic: Optional[MeshtasticHandler] = None
 
-waterfall_clients: Set[WebSocket] = set()
-dmr_clients:       Set[WebSocket] = set()
-audio_clients:     Set[WebSocket] = set()
-airband_clients:   Set[WebSocket] = set()
+waterfall_clients:  Set[WebSocket] = set()
+dmr_clients:        Set[WebSocket] = set()
+audio_clients:      Set[WebSocket] = set()
+airband_clients:    Set[WebSocket] = set()
+meshtastic_clients: Set[WebSocket] = set()
 
 # Last-known airband status — returned by /api/airband/status
 airband_status: dict = {
@@ -152,6 +159,18 @@ async def on_airband_audio(pcm: bytes) -> None:
 async def on_airband_status(status: dict) -> None:
     airband_status.update(status)
     await broadcast_json(airband_clients, status)
+
+
+# ---------------------------------------------------------------------------
+# Meshtastic callbacks
+# ---------------------------------------------------------------------------
+
+async def on_mesh_packet(packet: dict) -> None:
+    await broadcast_json(meshtastic_clients, packet)
+
+
+async def on_mesh_status(status: dict) -> None:
+    await broadcast_json(meshtastic_clients, status)
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +270,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, airband
+    global sdr, decoder, airband, meshtastic
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -302,6 +321,20 @@ async def lifespan(app: FastAPI):
                            exc_info=True)
             airband = None
 
+    # Start Meshtastic handler
+    if MESH_ENABLE:
+        try:
+            meshtastic = MeshtasticHandler(
+                dev_path=MESH_PORT,
+                packet_callback=on_mesh_packet,
+                status_callback=on_mesh_status,
+            )
+            await meshtastic.start()
+            logger.info("MeshtasticHandler started (port=%s)", MESH_PORT or "auto")
+        except Exception:
+            logger.warning("MeshtasticHandler failed to start", exc_info=True)
+            meshtastic = None
+
     yield  # application is running
 
     # Shutdown
@@ -311,6 +344,8 @@ async def lifespan(app: FastAPI):
     sdr.stop()
     if airband is not None:
         await airband.stop()
+    if meshtastic is not None:
+        await meshtastic.stop()
     logger.info("Shutdown complete")
 
 
@@ -582,9 +617,67 @@ async def api_airband_channel(idx: int):
         raise HTTPException(status_code=400, detail="Invalid channel index")
     airband.set_scanner(False)
     airband_status["scanner_on"] = False
-    # _tune_to is async — run from this endpoint via create_task
     asyncio.create_task(airband._tune_to(idx))
     return {"active_idx": idx, "channel": airband.channels[idx]}
+
+
+# ---------------------------------------------------------------------------
+# Meshtastic WebSocket + REST endpoints
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/meshtastic")
+async def ws_meshtastic(websocket: WebSocket):
+    await websocket.accept()
+    meshtastic_clients.add(websocket)
+    logger.info("Meshtastic client connected — total=%d", len(meshtastic_clients))
+    # Send current state immediately on connect
+    try:
+        status = meshtastic.status_dict() if meshtastic else {
+            "type": "status", "available": False, "connected": False,
+            "device": None, "node_count": 0, "local_id": None,
+        }
+        await websocket.send_text(json.dumps(status))
+        if meshtastic and meshtastic.nodes:
+            await websocket.send_text(json.dumps({
+                "type": "node_list",
+                "nodes": meshtastic.node_list(),
+            }))
+        if meshtastic and meshtastic.messages:
+            for msg in reversed(meshtastic.messages[:50]):
+                await websocket.send_text(json.dumps({"type": "message", "message": msg}))
+    except Exception:
+        pass
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in meshtastic WebSocket handler")
+    finally:
+        meshtastic_clients.discard(websocket)
+        logger.info("Meshtastic client disconnected — total=%d", len(meshtastic_clients))
+
+
+@app.get("/api/meshtastic/status")
+async def api_mesh_status():
+    if meshtastic is None:
+        return {"available": False, "connected": False, "device": None, "node_count": 0}
+    return meshtastic.status_dict()
+
+
+@app.get("/api/meshtastic/nodes")
+async def api_mesh_nodes():
+    if meshtastic is None:
+        return []
+    return meshtastic.node_list()
+
+
+@app.get("/api/meshtastic/messages")
+async def api_mesh_messages():
+    if meshtastic is None:
+        return []
+    return meshtastic.messages
 
 
 # ---------------------------------------------------------------------------
