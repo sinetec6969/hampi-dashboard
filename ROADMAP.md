@@ -2,8 +2,8 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.1-1_itbegins (2026-05-16)  
-> **Status:** Pre-beta. DMR voice decode, call history, caller map, multi-page dashboard shell, and AM airband scanner are functional. DMR audio playback is work-in-progress (see warnings below).
+> **Current version:** 0.1.1_m3shd4ddY (2026-05-16)  
+> **Status:** Pre-beta. DMR voice decode, call history, caller map, multi-page dashboard shell, AM airband scanner, and Meshtastic mesh monitor are functional. DMR audio playback is work-in-progress (see warnings below).
 
 ---
 
@@ -39,8 +39,8 @@ Each active receive mode (DMR, airband, ADS-B, APRS) needs its own RTL-SDR dongl
 
 | Phase | Board | Notes |
 |---|---|---|
-| Current | Raspberry Pi 4 (4 GB) | DMR + airband (2 dongles) |
-| Pre-beta | Raspberry Pi 5 (8 GB) | Better compute for parallel decoders + ADS-B + Meshtastic |
+| Current | Raspberry Pi 4 (4 GB) | DMR + airband (2 dongles) + Meshtastic (USB) |
+| Pre-beta | Raspberry Pi 5 (8 GB) | Better compute for parallel decoders + ADS-B + APRS |
 
 **SDR dongles — current and planned:**
 | Dongle | Band | Mode | Status |
@@ -79,6 +79,35 @@ AIRBAND_DWELL_MS=2000     # ms per channel when scanning
 - Channel list is hardcoded (Guard, CTAF, Center, Departure) — `config.yaml` support planned
 - No ATIS text decode
 - Squelch is audio-RMS based — works well for AM voice; may need adjustment near strong carriers
+
+---
+
+### ✅ Meshtastic Mesh Monitor
+
+Monitor a Meshtastic LoRa mesh network — node positions, messages, and telemetry — via USB serial.
+
+**Implemented:**
+- `backend/meshtastic_handler.py` (new): `MeshtasticHandler` — connects to a Meshtastic device via USB serial using the `meshtastic` Python package; auto-detects port or uses `MESH_PORT` env var; retries every 10 s if no device found; pypubsub callbacks (`NODEINFO`, `POSITION`, `TELEMETRY`, `TEXT_MESSAGE`) bridged to asyncio via `run_coroutine_threadsafe`; maintains node registry seeded from `iface.nodes` on connect; graceful no-op if package is absent
+- `backend/main.py` — `/ws/meshtastic` WebSocket (sends full node list + recent messages on connect, then live `node_update` / `message` / `status` JSON frames); REST: `GET /api/meshtastic/status`, `/nodes`, `/messages`
+- `frontend/src/pages/MeshtasticPage.tsx` — node list sorted by last-heard with online/offline dot, battery level (colour-coded), SNR, hop count, temperature/humidity; Leaflet map with cyan pins (remote) and purple pin (local node), auto-flies to first GPS fix on connect; scrollable message log with auto-scroll; all state degrades cleanly to "Searching…" when no device is present
+
+**Configuration (env vars):**
+```
+MESH_ENABLE=1          # 1 = start handler on boot (default: 1)
+MESH_PORT=             # serial port path — leave blank for auto-detect
+                       # e.g. MESH_PORT=/dev/ttyUSB0 to pin the Heltec V3
+```
+
+**Hardware note — Heltec WiFi LoRa 32 V3:**  
+The Heltec V3 uses a CP2102N USB-Serial chip and appears as `/dev/ttyUSB0` on the Pi. Auto-detect finds it without setting `MESH_PORT`. The Pi user must be in the `dialout` group to open the port:
+```bash
+sudo usermod -aG dialout $USER   # then log out and back in
+```
+
+**Known limitations:**
+- TRACEROUTE packets are received but not displayed in the UI (logged only)
+- No TX / send-message capability — receive/monitor only
+- Node telemetry is displayed as current values; no sparkline history yet
 
 ---
 
@@ -134,30 +163,6 @@ Decode Automatic Packet Reporting System traffic on 144.390 MHz (North America) 
 
 **Notes:**
 - `direwolf` can also act as a digipeater / igate if ever desired — architecture supports it
-
----
-
-### 3. Meshtastic Decoding
-
-Monitor a local Meshtastic LoRa mesh network — node positions, messages, telemetry.
-
-**Requires: Meshtastic USB device (no SDR needed)**
-
-**Backend:**
-- Connect to a Meshtastic device via USB serial or TCP using the `meshtastic` Python package
-- Subscribe to `meshtastic.mesh_pb2` packet stream
-- Decode: `NODEINFO`, `POSITION`, `TELEMETRY`, `TEXT_MESSAGE`, `TRACEROUTE` packet types
-- Maintain a node registry (ID → long name, short name, hardware model, last heard, position, battery)
-- WebSocket endpoint `/ws/meshtastic` — broadcast decoded packets
-- REST endpoint `GET /api/meshtastic/nodes` — current node snapshot
-
-**Frontend:**
-- Dedicated Meshtastic panel / tab
-- Node map — positions plotted on Leaflet, labelled with short names
-- Click node: long name, hardware, firmware, last heard, SNR/RSSI of last packet, battery %
-- Message log — channel text messages with sender, timestamp, hop count
-- Node list table — sortable, shows online/offline (last heard < 15 min = online)
-- Telemetry sparklines (battery voltage, temperature if reported)
 
 ---
 
@@ -248,8 +253,9 @@ talkgroups:
 1. **Fix DMR audio choppiness** — blocking for usable voice monitoring
 2. **Systemd + config.yaml** — quality of life; stops manual env-var sessions, makes channel list editable
 3. **udev rules** — required for stable multi-dongle operation
-4. **ADS-B** — second dongle already planned; `dump1090` does all the heavy lifting; high visual impact
-5. **APRS** — third dongle or time-share; `direwolf` handles decoding
-6. **Meshtastic** — no SDR needed; requires Meshtastic USB device
-7. **Talkgroup aliases + RadioID local DB** — DMR polish
-8. **Full beta tag**
+4. **ADS-B** — third dongle; `dump1090` does all the heavy lifting; high visual impact
+5. **APRS** — fourth dongle or time-share; `direwolf` handles decoding
+6. **Talkgroup aliases + RadioID local DB** — DMR polish
+7. **Full beta tag**
+
+✅ ~~Meshtastic~~ — implemented in 0.1.1_m3shd4ddY

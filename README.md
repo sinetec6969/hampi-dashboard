@@ -3,8 +3,8 @@
 **Locally-hosted multi-mode RF monitoring dashboard for Raspberry Pi.**  
 No cloud. No API keys. Everything runs on-device and serves to any browser on your LAN or Tailscale network.
 
-**Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme  
-**Version:** 0.1-1_itbegins  
+**Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme · meshtastic  
+**Version:** 0.1.1_m3shd4ddY  
 **Last updated:** 2026-05-16  
 
 ---
@@ -43,6 +43,7 @@ Each active receive mode needs its own dongle. You cannot run DMR and airband at
 | Dashboard home | ✅ Working | Multi-page shell, nav, mode cards |
 | Tailscale access | ✅ Working | Pi Tailscale IP shown on home page |
 | **Airband AM** | ✅ Working | Scanner, squelch, AudioWorklet playback — needs 2nd dongle |
+| **Meshtastic** | ✅ Working | Node map, message log, telemetry — Heltec V3 via USB |
 | DMR audio | ⚠️ Partial | Decoded and streamed — choppy on Pi (see warning above) |
 
 ---
@@ -51,7 +52,6 @@ Each active receive mode needs its own dongle. You cannot run DMR and airband at
 
 - **ADS-B** (1090 MHz) — `dump1090-fa` backend, live aircraft map with altitude colouring and track history. Needs a dedicated third RTL-SDR dongle.
 - **APRS** (144.390 MHz) — `direwolf` TNC, station map with standard APRS symbols, packet log, weather data. Fourth dongle or time-share with DMR.
-- **Meshtastic** — LoRa mesh network monitor via USB serial. Node map, text messages, telemetry. No SDR required.
 - **Config file** (`config.yaml`) — replace hard-coded env vars and hardcoded channel lists; talkgroup aliases, gain, squelch levels per mode.
 - **Systemd service** — auto-start on boot, restart on failure.
 - **Pi 5 migration** — better compute headroom for simultaneous modes.
@@ -91,6 +91,15 @@ See [ROADMAP.md](ROADMAP.md) for full per-mode design notes, known issues, and p
 - Frequency list panel with active channel highlight and RX indicator; click any channel to lock to it
 - Squelch slider and scanner on/off toggle in the UI
 
+### Meshtastic Mesh Monitor
+- Connects to a Meshtastic LoRa device via USB serial — no SDR required
+- Auto-detects the device on any serial port; retries every 10 s until found (set `MESH_PORT=/dev/ttyUSB0` to pin it)
+- Decodes `NODEINFO`, `POSITION`, `TELEMETRY`, and `TEXT_MESSAGE` packets
+- **Node list** — sorted by last-heard; online/offline indicator (< 15 min = online); battery level with colour coding (green/yellow/red); SNR, hop count, temperature/humidity when reported
+- **Node map** — Leaflet with cyan pins for remote nodes, purple for the local node; map auto-flies to the first node with GPS on connect
+- **Message log** — channel text messages with sender, timestamp, SNR; auto-scrolls to latest
+- Tested with Heltec WiFi LoRa 32 V3 (CP2102N, `/dev/ttyUSB0`)
+
 ### Audio Playback
 - Decoded voice streamed via WebSocket to Web Audio API
 - AudioWorklet path (secure context) for gapless real-time playback; scheduled `AudioBufferSourceNode` fallback for plain HTTP
@@ -111,10 +120,12 @@ See [ROADMAP.md](ROADMAP.md) for full per-mode design notes, known issues, and p
   - 1 dongle: DMR only (or airband only — not simultaneous)
   - 2 dongles: DMR + airband simultaneously ← current recommended setup
   - 3+ dongles: adds ADS-B and/or APRS (planned)
+- **Meshtastic device** (optional, no SDR) — any Meshtastic-compatible LoRa node connected via USB
+  - Tested: Heltec WiFi LoRa 32 V3 → appears as `/dev/ttyUSB0` (CP2102N chip)
 
 ## Software Dependencies
 
-- Python 3.11+, `uvicorn`, `fastapi`, `numpy`, `scipy`, `httpx`
+- Python 3.11+, `uvicorn`, `fastapi`, `numpy`, `scipy`, `httpx`, `meshtastic`
 - Node 18+, Vite, React 19, `leaflet`, `react-leaflet`
 - `dsd-fme` — must be in `$PATH`
 - `rtl_tcp` from `rtl-sdr` package
@@ -170,21 +181,35 @@ EOF
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
+### Serial port access for Meshtastic (Heltec V3)
+
+The Pi user needs to be in the `dialout` group to open USB serial ports:
+
+```bash
+sudo usermod -aG dialout $USER
+# Log out and back in (or: newgrp dialout)
+```
+
+The Heltec V3 appears as `/dev/ttyUSB0`. Auto-detect finds it — no config needed. If you want to pin it:
+```bash
+MESH_PORT=/dev/ttyUSB0 uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
 ### Start the server
 
-The backend manages `rtl_tcp` subprocesses internally:
+The backend manages `rtl_tcp` subprocesses and the Meshtastic connection internally:
 
 ```bash
 cd backend && source venv/bin/activate
 
-# Single dongle (DMR only, airband disabled or on same device)
-AIRBAND_ENABLE=0 uvicorn main:app --host 0.0.0.0 --port 8000
-
-# Two dongles (DMR on device 0, airband on device 1)
+# Full stack: DMR (device 0) + airband (device 1) + Meshtastic (auto-detect)
 uvicorn main:app --host 0.0.0.0 --port 8000
 
-# Single dongle, airband only (no DMR)
-SDR_FREQ=121500000 AIRBAND_RTL_DEV=0 uvicorn main:app --host 0.0.0.0 --port 8000
+# Single dongle, no airband
+AIRBAND_ENABLE=0 uvicorn main:app --host 0.0.0.0 --port 8000
+
+# No Meshtastic device attached yet — disable to suppress retry log spam
+MESH_ENABLE=0 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Open `http://<pi-ip>:8000/` in a browser.
@@ -199,6 +224,13 @@ Open `http://<pi-ip>:8000/` in a browser.
 | `AIRBAND_GAIN` | `40.0` | Tuner gain in dB |
 | `AIRBAND_SQUELCH` | `0.01` | Audio RMS threshold — increase if noise triggers squelch |
 | `AIRBAND_DWELL_MS` | `2000` | Ms per channel when scanning |
+
+### Meshtastic configuration
+
+| Env var | Default | Notes |
+|---|---|---|
+| `MESH_ENABLE` | `1` | Set to `0` to disable entirely (suppresses retry loop) |
+| `MESH_PORT` | *(auto)* | Serial port path — leave blank to auto-detect; e.g. `/dev/ttyUSB0` |
 
 ---
 
@@ -227,6 +259,16 @@ Two root causes fixed in v0.0.3: DSD output buffering (fixed with `stdbuf -oL`) 
 ### SDR loop crashes and waterfall goes blank
 `rtl_tcp` dropped the connection. The SDR loop auto-reconnects after 3 seconds. If it persists, restart the server.
 
+### Meshtastic page shows "Searching for device…" after plugging in
+1. Check `dialout` group membership: `groups $USER` — must include `dialout`. If not: `sudo usermod -aG dialout $USER` and re-login.
+2. Check the port exists: `ls /dev/ttyUSB*` — Heltec V3 should appear as `/dev/ttyUSB0`.
+3. Check for port conflicts: `lsof /dev/ttyUSB0` — another process (e.g. ModemManager) may have grabbed it. Disable ModemManager: `sudo systemctl disable --now ModemManager`.
+4. Set `MESH_PORT=/dev/ttyUSB0` explicitly if auto-detect is missing the device.
+5. Watch the server log — you should see `Meshtastic connected — device=/dev/ttyUSB0` within a few seconds of plugging in.
+
+### Meshtastic nodes appear but map is empty
+Nodes without a GPS fix have no position and won't appear on the map. The node list will still show them. The map auto-centres when the first node with a GPS lock is heard — this can take a minute after the device boots.
+
 ---
 
 ## Architecture
@@ -250,11 +292,29 @@ Dongle 1 (Airband, 118–137 MHz)
                                     ├── channel scanner (dwell / hold / hang)
                                     ├── squelch gate (audio RMS threshold)
                                     └── PCM + status → /ws/airband → AudioWorklet + freq list UI
+
+Heltec V3 (Meshtastic, LoRa)
+    └── USB serial /dev/ttyUSB0
+            └── meshtastic.SerialInterface
+                    └── MeshtasticHandler (pubsub → asyncio bridge)
+                            ├── node registry (NODEINFO / POSITION / TELEMETRY)
+                            ├── message log (TEXT_MESSAGE)
+                            └── node_update / message / status → /ws/meshtastic → node map + message log
 ```
 
 ---
 
 ## Version History
+
+### 0.1.1_m3shd4ddY — 2026-05-16
+- **Meshtastic mesh monitor** — full implementation replacing the placeholder page.
+  - `backend/meshtastic_handler.py` (new): `MeshtasticHandler` — connects via USB serial using the `meshtastic` Python package; auto-detects port or uses `MESH_PORT` env var; retries every 10 s when no device found; pypubsub callbacks bridged to asyncio via `run_coroutine_threadsafe`; decodes `NODEINFO`, `POSITION`, `TELEMETRY`, `TEXT_MESSAGE`; seeds node registry from `iface.nodes` on connect; graceful no-op if package absent.
+  - `backend/main.py`: `/ws/meshtastic` WS (full node list + recent messages on connect, then live frames); `GET /api/meshtastic/status`, `/nodes`, `/messages`; handler in lifespan with graceful fallback.
+  - `frontend/src/pages/MeshtasticPage.tsx`: node list (sorted by last-heard, online/offline dot, battery colour coding, SNR, hops, temp/humidity), Leaflet map (cyan remote pins, purple local pin, `MapAutoCenter` flies to first GPS fix), message log with auto-scroll, WS reconnect on close.
+  - `backend/requirements.txt`: `meshtastic` added.
+  - `frontend/src/App.css`: Meshtastic styles.
+- **ROADMAP.md**: Meshtastic marked ✅, moved from roadmap to feature status; priority list updated.
+- **README**: Meshtastic added to feature table, features section, hardware, dependencies, setup (serial/dialout), config table, troubleshooting, architecture diagram.
 
 ### 0.1-1_itbegins — 2026-05-16
 - **Airband AM scanner** — full implementation replacing the placeholder page.
@@ -317,7 +377,7 @@ See full changelog in [previous README entries](https://github.com/sinetec6969/h
 ### Signal & Decoding
 - [ ] ADS-B live aircraft map (`dump1090-fa`, third dongle)
 - [ ] APRS decode (`direwolf`, fourth dongle or DMR time-share)
-- [ ] Meshtastic node monitor (USB serial, no SDR)
+- [x] Meshtastic node monitor (USB serial, no SDR) ← done in 0.1.1_m3shd4ddY
 - [ ] Trunked DMR system support (control channel parsing)
 - [ ] P25 Phase 1 & 2, NXDN, D-STAR
 
