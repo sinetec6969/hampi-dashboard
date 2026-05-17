@@ -38,27 +38,41 @@ PacketCb = Callable[[dict], Awaitable[None]]
 StatusCb = Callable[[dict], Awaitable[None]]
 
 
+def _pos_float(pos: dict, float_key: str, int_key: str) -> Optional[float]:
+    """
+    Extract a lat or lon from a position dict.
+    Prefers the float field (_fixupPosition already ran), falls back to the
+    raw integer field. Returns None only when neither is present.
+    """
+    v = pos.get(float_key)
+    if v is not None:
+        return float(v)
+    raw = pos.get(int_key)
+    if raw is not None:
+        return raw / 1e7
+    return None
+
+
 def _node_from_iface(raw: dict, local_id: Optional[int] = None) -> dict:
     """Normalise an iface.nodes entry to our wire format."""
     num  = raw.get("num", 0)
     user = raw.get("user", {})
     pos  = raw.get("position", {})
     dm   = raw.get("deviceMetrics", {})
-    lat_i = pos.get("latitudeI")
-    lon_i = pos.get("longitudeI")
+    env  = raw.get("environmentMetrics", {})
     return {
         "node_id":      user.get("id", f"!{num:08x}"),
         "num":          num,
         "long_name":    user.get("longName", ""),
         "short_name":   user.get("shortName", f"!{num:04x}"),
         "hw_model":     user.get("hwModel", ""),
-        "lat":          lat_i / 1e7 if lat_i else None,
-        "lon":          lon_i / 1e7 if lon_i else None,
+        "lat":          _pos_float(pos, "latitude",  "latitudeI"),
+        "lon":          _pos_float(pos, "longitude", "longitudeI"),
         "altitude":     pos.get("altitude"),
         "battery_level":dm.get("batteryLevel"),
         "voltage":      dm.get("voltage"),
-        "temperature":  None,
-        "humidity":     None,
+        "temperature":  env.get("temperature"),
+        "humidity":     env.get("relativeHumidity"),
         "snr":          raw.get("snr"),
         "rssi":         None,
         "last_heard":   raw.get("lastHeard"),
@@ -178,8 +192,14 @@ class MeshtasticHandler:
     def _cb_connect(self, interface, topic=None) -> None:
         self.connected   = True
         self.device_path = getattr(interface, "devPath", None)
-        my_info          = getattr(interface, "myInfo", None)
-        self.local_id    = getattr(my_info, "myNodeNum", None) if my_info else None
+        # localNode.nodeNum is the most reliable path in 2.7.x
+        try:
+            self.local_id = interface.localNode.nodeNum
+        except Exception:
+            try:
+                self.local_id = interface.myInfo.my_node_num
+            except Exception:
+                self.local_id = None
         self._schedule(self._handle_connect(interface))
 
     def _cb_lost(self, interface, topic=None) -> None:
@@ -255,11 +275,11 @@ class MeshtasticHandler:
             if user.get("id"):        node["node_id"]    = user["id"]
 
         elif portnum == "POSITION_APP":
-            pos   = decoded.get("position", {})
-            lat_i = pos.get("latitudeI")
-            lon_i = pos.get("longitudeI")
-            if lat_i: node["lat"] = lat_i / 1e7
-            if lon_i: node["lon"] = lon_i / 1e7
+            pos = decoded.get("position", {})
+            lat = _pos_float(pos, "latitude",  "latitudeI")
+            lon = _pos_float(pos, "longitude", "longitudeI")
+            if lat is not None: node["lat"] = lat
+            if lon is not None: node["lon"] = lon
             if pos.get("altitude") is not None:
                 node["altitude"] = pos["altitude"]
 
