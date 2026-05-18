@@ -4,7 +4,7 @@
 No cloud. No API keys. Everything runs on-device and serves to any browser on your LAN or Tailscale network.
 
 **Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme · meshtastic  
-**Version:** 0.1.2_m3shPAPI  
+**Version:** 0.1.3_s3ndIt  
 **Last updated:** 2026-05-17  
 
 ---
@@ -97,8 +97,10 @@ See [ROADMAP.md](ROADMAP.md) for full per-mode design notes, known issues, and p
 - Decodes `NODEINFO`, `POSITION`, `TELEMETRY`, and `TEXT_MESSAGE` packets
 - **Node list** — sorted by last-heard; online/offline indicator (< 15 min = online); battery level with colour coding (green/yellow/red); SNR, hop count, temperature/humidity when reported
 - **Node map** — Leaflet with cyan pins for remote nodes, purple for the local node; map auto-flies to the first node with GPS on connect
-- **Message log** — channel text messages with sender, timestamp, SNR; auto-scrolls to latest
-- Tested with Heltec WiFi LoRa 32 V3 (CP2102N, `/dev/ttyUSB0`)
+- **Message log** — incoming channel text messages with sender, timestamp, SNR; auto-scrolls to latest
+- **Send messages** — compose bar with Enter-to-send, real channel names from device (e.g. Primary, NCMesh), 228-byte counter
+- **DM mode** — click any node to address it directly; compose bar shows `→ Node` pill; Escape cancels back to broadcast
+- Tested with Heltec WiFi LoRa 32 V3 (CP2102N, `/dev/ttyUSB0`), 200-node NCMesh network
 
 ### Audio Playback
 - Decoded voice streamed via WebSocket to Web Audio API
@@ -305,6 +307,12 @@ Heltec V3 (Meshtastic, LoRa)
 ---
 
 ## Version History
+
+### 0.1.3_s3ndIt — 2026-05-17
+- **Meshtastic send messages** — two-way messaging from the dashboard.
+  - `backend/meshtastic_handler.py`: `send_text(text, destination, channel)` — runs `sendText()` in thread executor; `get_channels()` — parses `localNode.channels` protobuf list into `[{index, name, role}]`, surfacing named channels (e.g. "NCMesh") correctly.
+  - `backend/main.py`: `POST /api/meshtastic/send` (validates UTF-8 byte length ≤ 228, 503 when disconnected); `GET /api/meshtastic/channels`.
+  - `frontend`: compose bar with text input (Enter to send), channel picker (real names from device), 228-byte character counter, send button. DM mode — select a node in the list to address a direct message; compose shows `→ ShortName` pill, Escape/× cancels to broadcast. Sent messages echoed optimistically to the log in green as "You". Send error banner auto-dismisses after 4 s. Message panel height 140 → 220 px.
 
 ### 0.1.2_m3shPAPI — 2026-05-17
 - **Meshtastic handler field corrections** — verified against meshtastic 2.7.8 package source before first live connection; fixed three bugs that would have silently misbehaved on real hardware:

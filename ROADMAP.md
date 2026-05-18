@@ -2,7 +2,7 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.1.2_m3shPAPI (2026-05-17)  
+> **Current version:** 0.1.3_s3ndIt (2026-05-17)  
 > **Status:** Pre-beta. DMR voice decode, call history, caller map, multi-page dashboard shell, AM airband scanner, and Meshtastic mesh monitor are all live. DMR audio playback is work-in-progress (see warnings below).
 
 ---
@@ -88,8 +88,14 @@ Monitor a Meshtastic LoRa mesh network — node positions, messages, and telemet
 
 **Implemented:**
 - `backend/meshtastic_handler.py` (new): `MeshtasticHandler` — connects to a Meshtastic device via USB serial using the `meshtastic` Python package; auto-detects port or uses `MESH_PORT` env var; retries every 10 s if no device found; pypubsub callbacks (`NODEINFO`, `POSITION`, `TELEMETRY`, `TEXT_MESSAGE`) bridged to asyncio via `run_coroutine_threadsafe`; maintains node registry seeded from `iface.nodes` on connect; graceful no-op if package is absent
-- `backend/main.py` — `/ws/meshtastic` WebSocket (sends full node list + recent messages on connect, then live `node_update` / `message` / `status` JSON frames); REST: `GET /api/meshtastic/status`, `/nodes`, `/messages`
-- `frontend/src/pages/MeshtasticPage.tsx` — node list sorted by last-heard with online/offline dot, battery level (colour-coded), SNR, hop count, temperature/humidity; Leaflet map with cyan pins (remote) and purple pin (local node), auto-flies to first GPS fix on connect; scrollable message log with auto-scroll; all state degrades cleanly to "Searching…" when no device is present
+- `backend/main.py` — `/ws/meshtastic` WebSocket; REST: `GET /api/meshtastic/status`, `/nodes`, `/messages`, `/channels`; `POST /api/meshtastic/send`
+- `frontend/src/pages/MeshtasticPage.tsx` — node list, Leaflet map, message log, compose bar with channel picker and DM mode
+- `meshtastic_handler.py` — `send_text()`, `get_channels()` (reads named channels from `localNode.channels` protobuf)
+
+**Send messages (added 0.1.3_s3ndIt):**
+- Compose bar: text input, Enter to send, 228-byte UTF-8 counter, channel picker with real names from device
+- DM mode: click a node → `→ ShortName` pill; sends to that node ID; Escape cancels to broadcast
+- Sent messages echoed optimistically to the log in green
 
 **Configuration (env vars):**
 ```
@@ -106,7 +112,6 @@ sudo usermod -aG dialout $USER   # then log out and back in
 
 **Known limitations:**
 - TRACEROUTE packets are received but not displayed in the UI (logged only)
-- No TX / send-message capability — receive/monitor only
 - Node telemetry is displayed as current values; no sparkline history yet
 
 ---
