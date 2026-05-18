@@ -26,6 +26,7 @@ from typing import Optional, Set
 import httpx
 import numpy as np
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
@@ -678,6 +679,35 @@ async def api_mesh_messages():
     if meshtastic is None:
         return []
     return meshtastic.messages
+
+
+@app.get("/api/meshtastic/channels")
+async def api_mesh_channels():
+    if meshtastic is None:
+        return []
+    return meshtastic.get_channels()
+
+
+class MeshSendBody(BaseModel):
+    text: str
+    destination: str = "^all"
+    channel: int = 0
+
+
+@app.post("/api/meshtastic/send")
+async def api_mesh_send(body: MeshSendBody):
+    if meshtastic is None or not meshtastic.connected:
+        raise HTTPException(status_code=503, detail="Meshtastic not connected")
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty message")
+    if len(text.encode("utf-8")) > 228:
+        raise HTTPException(status_code=400, detail="Message too long (max 228 bytes)")
+    try:
+        await meshtastic.send_text(text, destination=body.destination, channel=body.channel)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

@@ -332,3 +332,46 @@ class MeshtasticHandler:
             "node_count": len(self.nodes),
             "local_id":   f"!{self.local_id:08x}" if self.local_id else None,
         }
+
+    def get_channels(self) -> list[dict]:
+        """Return active channels from localNode.channels (protobuf list)."""
+        if self._iface is None:
+            return []
+        try:
+            out = []
+            for ch in getattr(self._iface.localNode, "channels", []) or []:
+                role = ch.role  # 0=DISABLED 1=PRIMARY 2=SECONDARY
+                if role == 0:
+                    continue
+                name = (ch.settings.name or "").strip()
+                if not name:
+                    name = "Primary" if role == 1 else f"Ch {ch.index}"
+                out.append({
+                    "index": ch.index,
+                    "name":  name,
+                    "role":  "PRIMARY" if role == 1 else "SECONDARY",
+                })
+            return out
+        except Exception:
+            logger.debug("get_channels failed", exc_info=True)
+            return []
+
+    async def send_text(
+        self,
+        text: str,
+        destination: str = "^all",
+        channel: int = 0,
+    ) -> None:
+        """Send a text message. Runs sendText in the thread executor (blocking)."""
+        if not self.connected or self._iface is None:
+            raise RuntimeError("Not connected to Meshtastic device")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: self._iface.sendText(
+                text,
+                destinationId=destination,
+                channelIndex=channel,
+            ),
+        )
+        logger.info("Sent text to=%s ch=%d: %r", destination, channel, text[:60])

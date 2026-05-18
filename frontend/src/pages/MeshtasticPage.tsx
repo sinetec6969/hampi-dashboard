@@ -35,6 +35,14 @@ interface MeshMessage {
   channel:    number
   hop_limit:  number
   snr:        number | null
+  sent?:      boolean   // true for optimistic outbound messages
+  to_id?:     string    // set for DMs
+}
+
+interface MeshChannel {
+  index: number
+  name:  string
+  role:  string
 }
 
 interface MeshStatus {
@@ -44,6 +52,8 @@ interface MeshStatus {
   node_count: number
   local_id:   string | null
 }
+
+const MAX_MSG_BYTES = 228
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -75,6 +85,10 @@ function battColor(pct: number | null): string {
   return '#ff4444'
 }
 
+function byteLen(s: string): number {
+  return new TextEncoder().encode(s).length
+}
+
 // ── Map helpers ───────────────────────────────────────────────────────────
 
 function nodeIcon(node: MeshNode) {
@@ -90,7 +104,6 @@ function nodeIcon(node: MeshNode) {
   })
 }
 
-// Fly to first node with GPS once
 function MapAutoCenter({ nodes }: { nodes: MeshNode[] }) {
   const map  = useMap()
   const done = useRef(false)
@@ -113,9 +126,18 @@ export default function MeshtasticPage() {
   })
   const [nodes,    setNodes]    = useState<MeshNode[]>([])
   const [messages, setMessages] = useState<MeshMessage[]>([])
+  const [channels, setChannels] = useState<MeshChannel[]>([])
   const [selected, setSelected] = useState<string | null>(null)
-  const wsRef     = useRef<WebSocket | null>(null)
-  const msgEndRef = useRef<HTMLDivElement | null>(null)
+
+  // compose state
+  const [draft,     setDraft]     = useState('')
+  const [channel,   setChannel]   = useState(0)
+  const [sending,   setSending]   = useState(false)
+  const [sendError, setSendError] = useState('')
+
+  const wsRef      = useRef<WebSocket | null>(null)
+  const msgEndRef  = useRef<HTMLDivElement | null>(null)
+  const inputRef   = useRef<HTMLInputElement | null>(null)
 
   // ── WebSocket ─────────────────────────────────────────────────────────
 
@@ -138,9 +160,7 @@ export default function MeshtasticPage() {
             setNodes(prev => {
               const idx = prev.findIndex(n => n.node_id === msg.node.node_id)
               if (idx >= 0) {
-                const next = [...prev]
-                next[idx] = { ...next[idx], ...msg.node }
-                return next
+                const next = [...prev]; next[idx] = { ...next[idx], ...msg.node }; return next
               }
               return [...prev, msg.node]
             })
@@ -151,7 +171,7 @@ export default function MeshtasticPage() {
             )
             break
         }
-      } catch { /* ignore malformed */ }
+      } catch { /* ignore */ }
     }
 
     ws.onclose = () => {
@@ -166,16 +186,81 @@ export default function MeshtasticPage() {
     return () => { wsRef.current?.close() }
   }, [connectWs])
 
-  // Auto-scroll message log to bottom
+  // Fetch channels once on connect
+  useEffect(() => {
+    if (!status.connected) return
+    fetch('/api/meshtastic/channels')
+      .then(r => r.json())
+      .then((chs: MeshChannel[]) => {
+        setChannels(chs)
+        // Default to primary channel index
+        const primary = chs.find(c => c.role === 'PRIMARY')
+        if (primary) setChannel(primary.index)
+      })
+      .catch(() => {})
+  }, [status.connected])
+
+  // Auto-scroll message log
   useEffect(() => {
     msgEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // ── Send ──────────────────────────────────────────────────────────────
+
+  const selectedNode = selected ? nodes.find(n => n.node_id === selected) ?? null : null
+  const destination  = selectedNode && !selectedNode.is_local ? selectedNode.node_id : '^all'
+  const isDM         = destination !== '^all'
+  const remaining    = MAX_MSG_BYTES - byteLen(draft)
+
+  async function sendMessage() {
+    const text = draft.trim()
+    if (!text || !status.connected || sending) return
+    setSending(true)
+    setSendError('')
+    try {
+      const r = await fetch('/api/meshtastic/send', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text, destination, channel }),
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }))
+        throw new Error(err.detail ?? r.statusText)
+      }
+      // Optimistic echo
+      setMessages(prev => [...prev, {
+        id:         `sent-${Date.now()}`,
+        timestamp:  Date.now() / 1000,
+        from_id:    status.local_id ?? 'local',
+        from_short: 'You',
+        from_long:  '',
+        text,
+        channel,
+        hop_limit:  0,
+        snr:        null,
+        sent:       true,
+        to_id:      isDM ? destination : undefined,
+      }])
+      setDraft('')
+      inputRef.current?.focus()
+    } catch (e: unknown) {
+      setSendError(e instanceof Error ? e.message : String(e))
+      setTimeout(() => setSendError(''), 4000)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+    if (e.key === 'Escape') setSelected(null)
+  }
+
   // ── Derived ───────────────────────────────────────────────────────────
 
-  const sorted   = [...nodes].sort((a, b) => (b.last_heard ?? 0) - (a.last_heard ?? 0))
-  const onlineN  = nodes.filter(isOnline).length
-  const withPos  = nodes.filter(n => n.lat != null && n.lon != null)
+  const sorted  = [...nodes].sort((a, b) => (b.last_heard ?? 0) - (a.last_heard ?? 0))
+  const onlineN = nodes.filter(isOnline).length
+  const withPos = nodes.filter(n => n.lat != null && n.lon != null)
 
   // ── Render ────────────────────────────────────────────────────────────
 
@@ -190,13 +275,9 @@ export default function MeshtasticPage() {
           <span className="mesh-conn-text">
             {status.connected
               ? `${status.device ?? 'connected'} · ${onlineN}/${nodes.length} online`
-              : status.available
-              ? 'Searching for device…'
-              : 'Install: pip install meshtastic'}
+              : status.available ? 'Searching for device…' : 'Install: pip install meshtastic'}
           </span>
-          {status.local_id && (
-            <span className="mesh-local-id">{status.local_id}</span>
-          )}
+          {status.local_id && <span className="mesh-local-id">{status.local_id}</span>}
         </div>
       </div>
 
@@ -206,8 +287,7 @@ export default function MeshtasticPage() {
         {/* Node list */}
         <div className="mesh-nodelist">
           <div className="mesh-section-title">
-            Nodes
-            {nodes.length > 0 && <span className="mesh-count">{nodes.length}</span>}
+            Nodes {nodes.length > 0 && <span className="mesh-count">{nodes.length}</span>}
           </div>
 
           {sorted.length === 0 ? (
@@ -219,6 +299,7 @@ export default function MeshtasticPage() {
               key={node.node_id}
               className={`mesh-node-row${isOnline(node) ? ' online' : ''}${selected === node.node_id ? ' selected' : ''}`}
               onClick={() => setSelected(selected === node.node_id ? null : node.node_id)}
+              title={node.is_local ? 'Your node' : 'Click to select for DM'}
             >
               <div className="mesh-node-top">
                 <span className={`mesh-node-dot${isOnline(node) ? ' online' : ''}`} />
@@ -230,9 +311,7 @@ export default function MeshtasticPage() {
               <div className="mesh-node-meta">
                 {node.hw_model && <span>{node.hw_model}</span>}
                 {node.battery_level != null && (
-                  <span style={{ color: battColor(node.battery_level) }}>
-                    🔋 {node.battery_level}%
-                  </span>
+                  <span style={{ color: battColor(node.battery_level) }}>🔋 {node.battery_level}%</span>
                 )}
                 {node.snr != null && (
                   <span>SNR {node.snr >= 0 ? '+' : ''}{node.snr.toFixed(1)}</span>
@@ -253,13 +332,7 @@ export default function MeshtasticPage() {
 
         {/* Map */}
         <div className="mesh-map">
-          <MapContainer
-            center={[30, -20]}
-            zoom={2}
-            style={{ height: '100%', width: '100%' }}
-            zoomControl
-            scrollWheelZoom
-          >
+          <MapContainer center={[30, -20]} zoom={2} style={{ height: '100%', width: '100%' }} zoomControl scrollWheelZoom>
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
@@ -276,27 +349,13 @@ export default function MeshtasticPage() {
               >
                 <Popup>
                   <div style={{ fontFamily: 'monospace', minWidth: 160 }}>
-                    <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#0ea5e9' }}>
-                      {node.short_name}
-                    </div>
-                    {node.long_name && (
-                      <div style={{ fontSize: '0.82rem', marginTop: 2 }}>{node.long_name}</div>
-                    )}
-                    <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 4 }}>
-                      {node.node_id}
-                    </div>
-                    {node.hw_model && (
-                      <div style={{ fontSize: '0.7rem', color: '#666', marginTop: 2 }}>
-                        {node.hw_model}
-                      </div>
-                    )}
-                    <div style={{
-                      fontSize: '0.7rem', marginTop: 6,
-                      borderTop: '1px solid #eee', paddingTop: 4,
-                      display: 'flex', gap: 8, flexWrap: 'wrap',
-                    }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#0ea5e9' }}>{node.short_name}</div>
+                    {node.long_name && <div style={{ fontSize: '0.82rem', marginTop: 2 }}>{node.long_name}</div>}
+                    <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 4 }}>{node.node_id}</div>
+                    {node.hw_model && <div style={{ fontSize: '0.7rem', color: '#666', marginTop: 2 }}>{node.hw_model}</div>}
+                    <div style={{ fontSize: '0.7rem', marginTop: 6, borderTop: '1px solid #eee', paddingTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {node.battery_level != null && <span>🔋 {node.battery_level}%</span>}
-                      {node.snr  != null && <span>SNR {node.snr?.toFixed(1)}</span>}
+                      {node.snr != null && <span>SNR {node.snr?.toFixed(1)}</span>}
                       {node.altitude != null && <span>Alt {node.altitude} m</span>}
                       {node.temperature != null && <span>🌡 {node.temperature.toFixed(1)}°C</span>}
                     </div>
@@ -310,34 +369,92 @@ export default function MeshtasticPage() {
             ))}
           </MapContainer>
         </div>
-
       </div>
 
-      {/* Message log */}
+      {/* Message panel */}
       <div className="mesh-msgpanel">
-        <div className="mesh-section-title">
-          Messages
-          {messages.length > 0 && <span className="mesh-count">{messages.length}</span>}
+
+        {/* Log header */}
+        <div className="mesh-section-title" style={{ flexShrink: 0 }}>
+          Messages {messages.length > 0 && <span className="mesh-count">{messages.length}</span>}
         </div>
+
+        {/* Scrollable log */}
         <div className="mesh-msg-log">
           {messages.length === 0 ? (
             <div className="mesh-empty" style={{ padding: '6px 12px' }}>No messages yet</div>
           ) : messages.map(m => (
-            <div key={m.id} className="mesh-msg-row">
+            <div key={m.id} className={`mesh-msg-row${m.sent ? ' sent' : ''}`}>
               <span className="mesh-msg-time">{fmtTs(m.timestamp)}</span>
-              <span className="mesh-msg-from">{m.from_short}</span>
+              {m.sent
+                ? <span className="mesh-msg-from sent">You{m.to_id ? ` → ${nodes.find(n => n.node_id === m.to_id)?.short_name ?? m.to_id}` : ''}</span>
+                : <span className="mesh-msg-from">{m.from_short}</span>}
+              {m.channel > 0 && <span className="mesh-msg-ch">ch{m.channel}</span>}
               <span className="mesh-msg-text">{m.text}</span>
-              {m.snr != null && (
-                <span className="mesh-msg-snr">
-                  SNR {m.snr >= 0 ? '+' : ''}{m.snr.toFixed(1)}
-                </span>
-              )}
+              {m.snr != null && <span className="mesh-msg-snr">SNR {m.snr >= 0 ? '+' : ''}{m.snr.toFixed(1)}</span>}
             </div>
           ))}
           <div ref={msgEndRef} />
         </div>
-      </div>
 
+        {/* Compose bar */}
+        <div className="mesh-compose">
+          {/* DM target pill */}
+          {isDM && selectedNode && (
+            <div className="mesh-compose-to">
+              <span>→ {selectedNode.short_name}</span>
+              <button className="mesh-compose-clear" onClick={() => setSelected(null)} title="Cancel DM">×</button>
+            </div>
+          )}
+
+          {/* Channel selector */}
+          {channels.length > 1 && (
+            <select
+              className="mesh-compose-ch"
+              value={channel}
+              onChange={e => setChannel(Number(e.target.value))}
+              disabled={!status.connected}
+            >
+              {channels.map(ch => (
+                <option key={ch.index} value={ch.index}>{ch.name}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Text input */}
+          <input
+            ref={inputRef}
+            className="mesh-compose-input"
+            type="text"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={isDM ? `DM ${selectedNode?.short_name}…` : 'Broadcast message…'}
+            disabled={!status.connected || sending}
+            maxLength={500}
+          />
+
+          {/* Char counter */}
+          <span className={`mesh-compose-count${remaining < 20 ? ' warn' : ''}`}>
+            {remaining}
+          </span>
+
+          {/* Send button */}
+          <button
+            className="btn mesh-compose-send"
+            onClick={sendMessage}
+            disabled={!status.connected || !draft.trim() || sending || remaining < 0}
+          >
+            {sending ? '…' : '▶'}
+          </button>
+        </div>
+
+        {/* Send error */}
+        {sendError && (
+          <div className="mesh-send-error">{sendError}</div>
+        )}
+
+      </div>
     </div>
   )
 }
