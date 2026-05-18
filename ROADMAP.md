@@ -2,8 +2,8 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.1.1_m3shd4ddY (2026-05-16)  
-> **Status:** Pre-beta. DMR voice decode, call history, caller map, multi-page dashboard shell, AM airband scanner, and Meshtastic mesh monitor are functional. DMR audio playback is work-in-progress (see warnings below).
+> **Current version:** 0.1.2_m3shPAPI (2026-05-17)  
+> **Status:** Pre-beta. DMR voice decode, call history, caller map, multi-page dashboard shell, AM airband scanner, and Meshtastic mesh monitor are all live. DMR audio playback is work-in-progress (see warnings below).
 
 ---
 

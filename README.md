@@ -4,8 +4,8 @@
 No cloud. No API keys. Everything runs on-device and serves to any browser on your LAN or Tailscale network.
 
 **Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme · meshtastic  
-**Version:** 0.1.1_m3shd4ddY  
-**Last updated:** 2026-05-16  
+**Version:** 0.1.2_m3shPAPI  
+**Last updated:** 2026-05-17  
 
 ---
 
@@ -305,6 +305,16 @@ Heltec V3 (Meshtastic, LoRa)
 ---
 
 ## Version History
+
+### 0.1.2_m3shPAPI — 2026-05-17
+- **Meshtastic handler field corrections** — verified against meshtastic 2.7.8 package source before first live connection; fixed three bugs that would have silently misbehaved on real hardware:
+  - `_pos_float()` helper: prefers post-`_fixupPosition` `latitude`/`longitude` floats; falls back to `latitudeI`/`longitudeI` integers with explicit `is not None` guard (old `if lat_i:` dropped valid `0.0` coordinates).
+  - `_node_from_iface`: `environmentMetrics` now seeded from `iface.nodes` on connect (was always `None` previously).
+  - `_cb_connect`: local node ID via `interface.localNode.nodeNum` (correct 2.7.x path); `myInfo.myNodeNum` (camelCase, wrong) → `myInfo.my_node_num` fallback.
+- **`test_meshtastic.py`** — smoke test script: connect, dump full node DB, listen 30 s for live packets, exit cleanly.
+- **Home page** — Airband and Meshtastic cards updated from `coming-soon` to `live`; live cards reordered (DMR, Airband, Meshtastic); hardware hints removed from live cards; descriptions updated.
+- **`/api/sysinfo` version string** — corrected from stale `0.0.8-1` to current version.
+- **Confirmed live on hardware** — Heltec WiFi LoRa 32 V3 connected on `/dev/ttyUSB0`; 200-node mesh DB loaded on connect; TELEMETRY, POSITION, and STORE_FORWARD packets received in first 30 s.
 
 ### 0.1.1_m3shd4ddY — 2026-05-16
 - **Meshtastic mesh monitor** — full implementation replacing the placeholder page.
