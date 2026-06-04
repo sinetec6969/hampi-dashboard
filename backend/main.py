@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
+from adsb import ADSBDecoder
 from airband import AirbandScanner, DEFAULT_CHANNELS
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
@@ -72,19 +73,32 @@ AIRBAND_GAIN:    float = float(os.getenv("AIRBAND_GAIN",   "40.0"))
 AIRBAND_SQUELCH: float = float(os.getenv("AIRBAND_SQUELCH","0.01"))
 AIRBAND_DWELL:   int   = int(os.getenv("AIRBAND_DWELL_MS", "2000"))
 
+# ADS-B configuration
+ADSB_ENABLE:  bool  = os.getenv("ADSB_ENABLE", "0") == "1"
+ADSB_RTL_DEV: int   = int(os.getenv("ADSB_RTL_DEV", "2"))
+ADSB_GAIN:    float = float(os.getenv("ADSB_GAIN",   "-1"))   # negative = auto
+ADSB_LAT:     float = float(os.getenv("ADSB_LAT",    "0.0"))  # reference for CPR fallback
+ADSB_LON:     float = float(os.getenv("ADSB_LON",    "0.0"))
+
 # ---------------------------------------------------------------------------
 # Shared state
 # ---------------------------------------------------------------------------
 sdr:     SDREngine
 decoder: DMRDecoder
-airband:   Optional[AirbandScanner]    = None
-meshtastic: Optional[MeshtasticHandler] = None
+airband:       Optional[AirbandScanner]   = None
+meshtastic:    Optional[MeshtasticHandler] = None
+adsb_decoder:  Optional[ADSBDecoder]      = None  # dedicated-dongle ADS-B
+_mode_airband: Optional[AirbandScanner]   = None  # mode-switched airband on device 0
+_mode_adsb:    Optional[ADSBDecoder]      = None  # mode-switched ADS-B on device 0
+active_sdr_mode: str                      = "dmr"
+sdr_task: Optional[asyncio.Task]          = None
 
 waterfall_clients:  Set[WebSocket] = set()
 dmr_clients:        Set[WebSocket] = set()
 audio_clients:      Set[WebSocket] = set()
 airband_clients:    Set[WebSocket] = set()
 meshtastic_clients: Set[WebSocket] = set()
+adsb_clients:       Set[WebSocket] = set()
 
 # Last-known airband status — returned by /api/airband/status
 airband_status: dict = {
@@ -172,6 +186,14 @@ async def on_mesh_packet(packet: dict) -> None:
 
 async def on_mesh_status(status: dict) -> None:
     await broadcast_json(meshtastic_clients, status)
+
+
+# ---------------------------------------------------------------------------
+# ADS-B callback
+# ---------------------------------------------------------------------------
+
+async def on_adsb_aircraft(payload: dict) -> None:
+    await broadcast_json(adsb_clients, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +293,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, airband, meshtastic
+    global sdr, decoder, airband, meshtastic, adsb_decoder, sdr_task
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -297,7 +319,7 @@ async def lifespan(app: FastAPI):
     await decoder.start()
 
     # Launch SDR acquisition loop
-    task = asyncio.create_task(sdr_loop(), name="sdr-loop")
+    sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
 
     # Start airband scanner (optional — graceful on failure)
     if AIRBAND_ENABLE:
@@ -322,6 +344,22 @@ async def lifespan(app: FastAPI):
                            exc_info=True)
             airband = None
 
+    # Start dedicated ADS-B decoder (optional — needs its own dongle)
+    if ADSB_ENABLE:
+        try:
+            adsb_decoder = ADSBDecoder(
+                device_index=ADSB_RTL_DEV,
+                gain=ADSB_GAIN,
+                lat_ref=ADSB_LAT,
+                lon_ref=ADSB_LON,
+                aircraft_callback=on_adsb_aircraft,
+            )
+            await adsb_decoder.start()
+            logger.info("ADSBDecoder started on device=%d", ADSB_RTL_DEV)
+        except Exception:
+            logger.warning("ADSBDecoder failed to start — ADS-B disabled", exc_info=True)
+            adsb_decoder = None
+
     # Start Meshtastic handler
     if MESH_ENABLE:
         try:
@@ -339,12 +377,19 @@ async def lifespan(app: FastAPI):
     yield  # application is running
 
     # Shutdown
-    task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
+    if sdr_task is not None and not sdr_task.done():
+        sdr_task.cancel()
+        await asyncio.gather(sdr_task, return_exceptions=True)
     await decoder.stop()
     sdr.stop()
+    if _mode_airband is not None:
+        await _mode_airband.stop()
+    if _mode_adsb is not None:
+        await _mode_adsb.stop()
     if airband is not None:
         await airband.stop()
+    if adsb_decoder is not None:
+        await adsb_decoder.stop()
     if meshtastic is not None:
         await meshtastic.stop()
     logger.info("Shutdown complete")
@@ -454,7 +499,7 @@ async def api_sysinfo():
         "hostname":     socket.gethostname(),
         "local_ip":     None,
         "tailscale_ip": None,
-        "version":      "0.1.3_s3ndIt",
+        "version":      "0.1.4_THEPLANES",
     }
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -502,6 +547,102 @@ async def api_tune(freq: Optional[int] = None, gain: Optional[float] = None):
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"SDR unavailable: {exc}")
     return {"status": "ok", "changed": changed}
+
+
+def _cur_airband() -> Optional[AirbandScanner]:
+    """Return the airband scanner that is currently active for REST control."""
+    return _mode_airband if active_sdr_mode == "airband" else airband
+
+
+def _cur_adsb() -> Optional[ADSBDecoder]:
+    """Return the ADS-B decoder that is currently active."""
+    return _mode_adsb if active_sdr_mode == "adsb" else adsb_decoder
+
+
+@app.get("/api/sdr/mode")
+async def api_get_sdr_mode():
+    return {"mode": active_sdr_mode}
+
+
+@app.post("/api/sdr/mode")
+async def api_set_sdr_mode(mode: str):
+    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb
+
+    VALID = ("dmr", "airband", "adsb")
+    if mode not in VALID:
+        raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
+    if mode == active_sdr_mode:
+        return {"mode": active_sdr_mode}
+
+    loop = asyncio.get_running_loop()
+
+    # ── Stop currently active mode ───────────────────────────────
+    if active_sdr_mode == "dmr":
+        if sdr_task is not None and not sdr_task.done():
+            sdr_task.cancel()
+            await asyncio.gather(sdr_task, return_exceptions=True)
+            sdr_task = None
+        await decoder.stop()
+        await loop.run_in_executor(None, sdr.stop)
+
+    elif active_sdr_mode == "airband":
+        if _mode_airband is not None:
+            await _mode_airband.stop()
+            _mode_airband = None
+        airband_status["enabled"] = airband is not None
+
+    elif active_sdr_mode == "adsb":
+        if _mode_adsb is not None:
+            await _mode_adsb.stop()
+            _mode_adsb = None
+
+    # ── Start requested mode ─────────────────────────────────────
+    try:
+        if mode == "dmr":
+            await loop.run_in_executor(None, sdr.start)
+            await decoder.start()
+            sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
+
+        elif mode == "airband":
+            _mode_airband = AirbandScanner(
+                channels=DEFAULT_CHANNELS,
+                squelch=AIRBAND_SQUELCH,
+                dwell_ms=AIRBAND_DWELL,
+                gain=AIRBAND_GAIN,
+                rtl_device=sdr.device_index,
+                rtl_port=sdr.port,
+                audio_callback=on_airband_audio,
+                status_callback=on_airband_status,
+            )
+            await _mode_airband.start()
+            airband_status["enabled"] = True
+
+        elif mode == "adsb":
+            _mode_adsb = ADSBDecoder(
+                device_index=sdr.device_index,
+                gain=ADSB_GAIN,
+                lat_ref=ADSB_LAT,
+                lon_ref=ADSB_LON,
+                aircraft_callback=on_adsb_aircraft,
+            )
+            await _mode_adsb.start()
+
+    except Exception as exc:
+        # Failed — fall back to DMR
+        logger.error("Mode switch to %r failed: %s — restoring DMR", mode, exc)
+        _mode_airband = None
+        _mode_adsb    = None
+        try:
+            await loop.run_in_executor(None, sdr.start)
+            await decoder.start()
+            sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
+            active_sdr_mode = "dmr"
+        except Exception:
+            logger.exception("DMR fallback also failed")
+        raise HTTPException(status_code=503, detail=f"Mode switch to {mode!r} failed: {exc}")
+
+    active_sdr_mode = mode
+    return {"mode": active_sdr_mode}
 
 
 async def _geocode(city: str, state: str, country: str) -> tuple[float, float] | None:
@@ -593,33 +734,36 @@ async def api_airband_status():
 
 @app.post("/api/airband/squelch")
 async def api_airband_squelch(level: float):
-    if airband is None:
+    ab = _cur_airband()
+    if ab is None:
         raise HTTPException(status_code=503, detail="Airband not running")
-    airband.set_squelch(level)
-    airband_status["squelch"] = airband.squelch
-    return {"squelch": airband.squelch}
+    ab.set_squelch(level)
+    airband_status["squelch"] = ab.squelch
+    return {"squelch": ab.squelch}
 
 
 @app.post("/api/airband/scan")
 async def api_airband_scan(enabled: bool):
-    if airband is None:
+    ab = _cur_airband()
+    if ab is None:
         raise HTTPException(status_code=503, detail="Airband not running")
-    airband.set_scanner(enabled)
-    airband_status["scanner_on"] = airband.scanner_on
-    return {"scanner_on": airband.scanner_on}
+    ab.set_scanner(enabled)
+    airband_status["scanner_on"] = ab.scanner_on
+    return {"scanner_on": ab.scanner_on}
 
 
 @app.post("/api/airband/channel/{idx}")
 async def api_airband_channel(idx: int):
     """Manually lock to a channel index (turns scanner off)."""
-    if airband is None:
+    ab = _cur_airband()
+    if ab is None:
         raise HTTPException(status_code=503, detail="Airband not running")
-    if not airband.channels or idx < 0 or idx >= len(airband.channels):
+    if not ab.channels or idx < 0 or idx >= len(ab.channels):
         raise HTTPException(status_code=400, detail="Invalid channel index")
-    airband.set_scanner(False)
+    ab.set_scanner(False)
     airband_status["scanner_on"] = False
-    asyncio.create_task(airband._tune_to(idx))
-    return {"active_idx": idx, "channel": airband.channels[idx]}
+    asyncio.create_task(ab._tune_to(idx))
+    return {"active_idx": idx, "channel": ab.channels[idx]}
 
 
 # ---------------------------------------------------------------------------
@@ -708,6 +852,53 @@ async def api_mesh_send(body: MeshSendBody):
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# ADS-B WebSocket + REST endpoints
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/adsb")
+async def ws_adsb(websocket: WebSocket):
+    await websocket.accept()
+    adsb_clients.add(websocket)
+    logger.info("ADS-B client connected — total=%d", len(adsb_clients))
+    # Send current aircraft snapshot immediately
+    try:
+        cur = _cur_adsb()
+        if cur:
+            for ac in cur.aircraft_list():
+                await websocket.send_text(json.dumps({"type": "aircraft", "aircraft": ac}))
+    except Exception:
+        pass
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in ADS-B WebSocket handler")
+    finally:
+        adsb_clients.discard(websocket)
+        logger.info("ADS-B client disconnected — total=%d", len(adsb_clients))
+
+
+@app.get("/api/adsb/aircraft")
+async def api_adsb_aircraft():
+    cur = _cur_adsb()
+    return cur.aircraft_list() if cur else []
+
+
+@app.get("/api/adsb/status")
+async def api_adsb_status():
+    cur = _cur_adsb()
+    return {
+        "enabled":       cur is not None,
+        "mode_active":   active_sdr_mode == "adsb",
+        "aircraft_count": len(cur.aircraft) if cur else 0,
+        "lat_ref":       ADSB_LAT,
+        "lon_ref":       ADSB_LON,
+    }
 
 
 # ---------------------------------------------------------------------------

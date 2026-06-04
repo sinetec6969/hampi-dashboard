@@ -34,7 +34,7 @@ const MODES: ModeCard[] = [
     icon: '🛩',
     title: 'Airband AM',
     subtitle: 'VHF 118–137 MHz',
-    description: 'AM demodulation with channel scanner. Cycles Guard, CTAF, Center, and Departure — holds on squelch break. Requires a second RTL-SDR dongle.',
+    description: 'AM demodulation with channel scanner. Cycles Guard, CTAF, Center, and Departure — holds on squelch break. Switch SDR mode from the home page to share a single dongle.',
     status: 'live',
     color: '#44ccff',
   },
@@ -52,10 +52,9 @@ const MODES: ModeCard[] = [
     icon: '✈️',
     title: 'ADS-B',
     subtitle: '1090 MHz Aircraft',
-    description: 'Live aircraft map from 1090 MHz transponder broadcasts. Altitude, speed, heading, squawk, and track history.',
-    status: 'coming-soon',
+    description: 'Live aircraft map from 1090 MHz transponder broadcasts via rtl_adsb. Altitude, speed, heading, track history, click for details. Switch SDR mode or set ADSB_ENABLE=1 for a dedicated dongle.',
+    status: 'live',
     color: '#4488ff',
-    hardware: 'RTL-SDR + dump1090-fa',
   },
   {
     path: '/aprs',
@@ -71,11 +70,25 @@ const MODES: ModeCard[] = [
 
 export default function Home() {
   const [info, setInfo] = useState<SysInfo | null>(null)
+  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | null>(null)
+  const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
     fetch('/api/sysinfo').then(r => r.json()).then(setInfo).catch(() => {})
+    fetch('/api/sdr/mode').then(r => r.json()).then(d => setSdrMode(d.mode)).catch(() => {})
   }, [])
+
+  async function switchMode(mode: 'dmr' | 'airband' | 'adsb') {
+    if (mode === sdrMode || switching) return
+    setSwitching(true)
+    try {
+      const r = await fetch(`/api/sdr/mode?mode=${mode}`, { method: 'POST' })
+      const d = await r.json()
+      setSdrMode(d.mode)
+    } catch {}
+    setSwitching(false)
+  }
 
   return (
     <div className="home-page">
@@ -107,6 +120,36 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {sdrMode !== null && (
+        <div className="sdr-mode-bar">
+          <span className="sdr-mode-label">SDR</span>
+          <div className="sdr-mode-toggle">
+            <button
+              className={'sdr-mode-btn' + (sdrMode === 'dmr' ? ' sdr-mode-active' : '')}
+              onClick={() => switchMode('dmr')}
+              disabled={switching}
+            >
+              DMR
+            </button>
+            <button
+              className={'sdr-mode-btn' + (sdrMode === 'airband' ? ' sdr-mode-active' : '')}
+              onClick={() => switchMode('airband')}
+              disabled={switching}
+            >
+              Airband
+            </button>
+            <button
+              className={'sdr-mode-btn' + (sdrMode === 'adsb' ? ' sdr-mode-active' : '')}
+              onClick={() => switchMode('adsb')}
+              disabled={switching}
+            >
+              ADS-B
+            </button>
+          </div>
+          {switching && <span className="sdr-mode-switching">switching…</span>}
+        </div>
+      )}
 
       <div className="mode-grid">
         {MODES.map(m => (

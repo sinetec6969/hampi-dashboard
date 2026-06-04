@@ -3,9 +3,9 @@
 **Locally-hosted multi-mode RF monitoring dashboard for Raspberry Pi.**  
 No cloud. No API keys. Everything runs on-device and serves to any browser on your LAN or Tailscale network.
 
-**Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme · meshtastic  
-**Version:** 0.1.3_s3ndIt  
-**Last updated:** 2026-05-17  
+**Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme · meshtastic · pyModeS  
+**Version:** 0.1.4_THEPLANES  
+**Last updated:** 2026-06-04
 
 ---
 
@@ -14,17 +14,15 @@ No cloud. No API keys. Everything runs on-device and serves to any browser on yo
 ### DMR Audio is Choppy
 DMR voice is decoded and streamed correctly, but playback is intermittently choppy on the Pi 4. Root cause is not fully resolved — `dsd-fme` writes AMBE audio in irregular bursts and Pi CPU scheduling jitter compounds the problem. **Do not rely on DMR audio for monitoring-critical use** until this is fixed. Audio tends to be cleaner in the first few minutes of a session; restart the server if it degrades.
 
-### Multiple RTL-SDR Dongles Required for Simultaneous Modes
-Each active receive mode needs its own dongle. You cannot run DMR and airband at the same time on a single dongle.
+### SDR Mode Switching — One Dongle at a Time
+The home page SDR toggle lets you switch device 0 between DMR, Airband AM, and ADS-B without restarting the server. Only one mode is active at a time on a given dongle. For simultaneous operation you need multiple dongles — see the table below.
 
-| Mode | Device | Port |
+| Mode | Default device | Status |
 |---|---|---|
-| DMR | 0 | 1234 |
-| Airband AM | 1 | 1235 |
-| ADS-B | dedicated (`dump1090`) | — |
-| APRS | 2 (planned) | 1236 |
-
-**Single-dongle workaround:** Set `AIRBAND_RTL_DEV=0` — but you must stop and restart the server to switch between DMR and airband. They conflict at the hardware level.
+| DMR | device 0 | ✅ Always active on startup |
+| Airband AM | device 1 (or mode-switch to device 0) | ✅ Live |
+| ADS-B | device 0 (mode-switch) or dedicated dongle | ✅ Live |
+| APRS | planned | ○ Planned |
 
 **udev rules are essential** on multi-dongle setups to keep device indices stable across reboots. Without them, a reboot may swap which dongle is device 0 and device 1. See Setup below.
 
@@ -42,19 +40,20 @@ Each active receive mode needs its own dongle. You cannot run DMR and airband at
 | Memory channels | ✅ Working | localStorage, save/recall/delete |
 | Dashboard home | ✅ Working | Multi-page shell, nav, mode cards |
 | Tailscale access | ✅ Working | Pi Tailscale IP shown on home page |
-| **Airband AM** | ✅ Working | Scanner, squelch, AudioWorklet playback — needs 2nd dongle |
-| **Meshtastic** | ✅ Working | Node map, message log, telemetry — Heltec V3 via USB |
+| SDR mode switcher | ✅ Working | Switch device 0 between DMR / Airband / ADS-B from home page |
+| **Airband AM** | ✅ Working | Scanner, squelch, AudioWorklet playback |
+| **Meshtastic** | ✅ Working | Node map, message log, send/DM — Heltec V3 via USB |
+| **ADS-B** | ✅ Working | Live aircraft map, click-to-detail, track history, altitude colouring |
 | DMR audio | ⚠️ Partial | Decoded and streamed — choppy on Pi (see warning above) |
 
 ---
 
 ## Where We're Going
 
-- **ADS-B** (1090 MHz) — `dump1090-fa` backend, live aircraft map with altitude colouring and track history. Needs a dedicated third RTL-SDR dongle.
-- **APRS** (144.390 MHz) — `direwolf` TNC, station map with standard APRS symbols, packet log, weather data. Fourth dongle or time-share with DMR.
+- **APRS** (144.390 MHz) — `direwolf` TNC, station map with standard APRS symbols, packet log, weather data. Dedicated dongle or time-share with DMR via mode switcher.
 - **Config file** (`config.yaml`) — replace hard-coded env vars and hardcoded channel lists; talkgroup aliases, gain, squelch levels per mode.
 - **Systemd service** — auto-start on boot, restart on failure.
-- **Pi 5 migration** — better compute headroom for simultaneous modes.
+- **udev rules** — stable dongle indices across reboots (critical for multi-dongle setups).
 
 See [ROADMAP.md](ROADMAP.md) for full per-mode design notes, known issues, and priority order.
 
@@ -75,6 +74,12 @@ See [ROADMAP.md](ROADMAP.md) for full per-mode design notes, known issues, and p
 - Status bar shows connected client counts per stream
 - **Memory channels** — persistent channel bank (localStorage); save any frequency/gain with a name, recall with one tap
 
+### SDR Mode Switcher
+- Home page toggle: **DMR | Airband | ADS-B** — switches device 0 between modes without a server restart
+- Switching stops the current mode cleanly (cancels tasks, kills `rtl_tcp` / `rtl_adsb`), then starts the new one
+- Automatic rollback to DMR if the new mode fails to start
+- For simultaneous operation, pair with a dedicated second/third dongle (see env var config below)
+
 ### DMR Decode
 - `dsd-fme` decodes DMR/MOTOTRBO frames from FM-demodulated PCM
 - Sync indicator goes green on active voice traffic
@@ -90,6 +95,17 @@ See [ROADMAP.md](ROADMAP.md) for full per-mode design notes, known issues, and p
 - AudioWorklet playback — same pipeline as DMR, 48 kHz input rate
 - Frequency list panel with active channel highlight and RX indicator; click any channel to lock to it
 - Squelch slider and scanner on/off toggle in the UI
+
+### ADS-B Aircraft Tracking
+- Decodes 1090 MHz ADS-B transponder broadcasts via `rtl_adsb` subprocess + `pyModeS`
+- **Live Leaflet map** — aircraft plotted as `✈` icons rotated to heading, colour-coded by altitude
+  - Green: < 2,000 ft · Cyan: 2,000–10,000 ft · Blue: 10,000–25,000 ft · White: > 25,000 ft
+- **Click any aircraft** — detail panel shows callsign, ICAO hex, altitude, speed, heading, vertical rate (green = climbing, red = descending)
+- **Track history** — gold polyline of last 60 position fixes for the selected aircraft
+- **Aircraft list** — right sidebar sorted by altitude; fades stale contacts (>45 s)
+- CPR position decoding: two-message odd/even pair (no reference needed); falls back to single-message with `ADSB_LAT`/`ADSB_LON` reference
+- Aircraft pruned automatically after 60 s without a signal
+- Map auto-fits to aircraft on first fix; works with a single dongle via mode switch or dedicated dongle via `ADSB_ENABLE=1`
 
 ### Meshtastic Mesh Monitor
 - Connects to a Meshtastic LoRa device via USB serial — no SDR required
@@ -119,18 +135,18 @@ See [ROADMAP.md](ROADMAP.md) for full per-mode design notes, known issues, and p
 
 - Raspberry Pi 4 (4 GB recommended) or Pi 5
 - RTL-SDR dongle(s) — RTL-SDR Blog V4 or compatible RTL2832U device
-  - 1 dongle: DMR only (or airband only — not simultaneous)
-  - 2 dongles: DMR + airband simultaneously ← current recommended setup
-  - 3+ dongles: adds ADS-B and/or APRS (planned)
+  - 1 dongle: all modes via home-page SDR switcher (one mode active at a time)
+  - 2 dongles: DMR + airband simultaneously
+  - 3 dongles: DMR + airband + ADS-B simultaneously
 - **Meshtastic device** (optional, no SDR) — any Meshtastic-compatible LoRa node connected via USB
   - Tested: Heltec WiFi LoRa 32 V3 → appears as `/dev/ttyUSB0` (CP2102N chip)
 
 ## Software Dependencies
 
-- Python 3.11+, `uvicorn`, `fastapi`, `numpy`, `scipy`, `httpx`, `meshtastic`
+- Python 3.11+, `uvicorn`, `fastapi`, `numpy`, `scipy`, `httpx`, `meshtastic`, `pyModeS`
 - Node 18+, Vite, React 19, `leaflet`, `react-leaflet`
 - `dsd-fme` — must be in `$PATH`
-- `rtl_tcp` from `rtl-sdr` package
+- `rtl_tcp` and `rtl_adsb` from `rtl-sdr` package
 
 ## Setup
 
@@ -154,12 +170,6 @@ On first boot the kernel DVB driver may claim the device. Free it once:
 echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/rtlsdr.conf
 sudo modprobe -r dvb_usb_rtl28xxu 2>/dev/null; true
 ```
-
-Or for a one-time unbind without blacklisting:
-```bash
-echo "1-1.4" | sudo tee /sys/bus/usb/drivers/usb/unbind
-```
-Find your USB path with `ls /sys/bus/usb/devices/` — look for `idVendor=0bda`.
 
 ### udev rules for stable device indices (multi-dongle)
 
@@ -192,14 +202,9 @@ sudo usermod -aG dialout $USER
 # Log out and back in (or: newgrp dialout)
 ```
 
-The Heltec V3 appears as `/dev/ttyUSB0`. Auto-detect finds it — no config needed. If you want to pin it:
-```bash
-MESH_PORT=/dev/ttyUSB0 uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
 ### Start the server
 
-The backend manages `rtl_tcp` subprocesses and the Meshtastic connection internally:
+The backend manages `rtl_tcp` / `rtl_adsb` subprocesses and the Meshtastic connection internally:
 
 ```bash
 cd backend && source venv/bin/activate
@@ -207,10 +212,13 @@ cd backend && source venv/bin/activate
 # Full stack: DMR (device 0) + airband (device 1) + Meshtastic (auto-detect)
 uvicorn main:app --host 0.0.0.0 --port 8000
 
-# Single dongle, no airband
+# Single dongle — use home-page SDR mode switcher to toggle between DMR / Airband / ADS-B
 AIRBAND_ENABLE=0 uvicorn main:app --host 0.0.0.0 --port 8000
 
-# No Meshtastic device attached yet — disable to suppress retry log spam
+# Dedicated ADS-B dongle on device 2 (runs alongside DMR + airband)
+ADSB_ENABLE=1 ADSB_RTL_DEV=2 ADSB_LAT=30.2 ADSB_LON=-97.7 uvicorn main:app --host 0.0.0.0 --port 8000
+
+# No Meshtastic device attached yet
 MESH_ENABLE=0 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -227,12 +235,24 @@ Open `http://<pi-ip>:8000/` in a browser.
 | `AIRBAND_SQUELCH` | `0.01` | Audio RMS threshold — increase if noise triggers squelch |
 | `AIRBAND_DWELL_MS` | `2000` | Ms per channel when scanning |
 
+### ADS-B configuration
+
+| Env var | Default | Notes |
+|---|---|---|
+| `ADSB_ENABLE` | `0` | Set to `1` to start a dedicated decoder on boot (needs its own dongle) |
+| `ADSB_RTL_DEV` | `2` | RTL-SDR device index for dedicated ADS-B dongle |
+| `ADSB_GAIN` | `-1` | Tuner gain (negative = auto gain) |
+| `ADSB_LAT` | `0.0` | Your latitude — enables single-message CPR fallback for faster first fix |
+| `ADSB_LON` | `0.0` | Your longitude |
+
+Without `ADSB_ENABLE=1`, ADS-B is available via the SDR mode switcher on the home page (uses device 0, stops DMR while active).
+
 ### Meshtastic configuration
 
 | Env var | Default | Notes |
 |---|---|---|
 | `MESH_ENABLE` | `1` | Set to `0` to disable entirely (suppresses retry loop) |
-| `MESH_PORT` | *(auto)* | Serial port path — leave blank to auto-detect; e.g. `/dev/ttyUSB0` |
+| `MESH_PORT` | *(auto)* | Serial port path — leave blank to auto-detect; e.g. `/dev/ttyUSB0` to pin the Heltec V3 |
 
 ---
 
@@ -242,12 +262,18 @@ Open `http://<pi-ip>:8000/` in a browser.
 Kernel DVB driver is holding the device. Run the blacklist command in Setup above.
 
 ### Airband scanner starts but no audio
-1. Check `AIRBAND_RTL_DEV` — default is device 1. If you only have one dongle, set `AIRBAND_RTL_DEV=0` (but stop DMR first or it will conflict).
+1. Check `AIRBAND_RTL_DEV` — default is device 1. If you only have one dongle, use the home-page SDR mode switcher to switch to Airband mode.
 2. Try increasing `AIRBAND_SQUELCH=0.05` — if noise floor is high it may be blocking the squelch from opening.
 3. Check the server log for `AirbandScanner started` — if it says `AirbandScanner failed to start` the dongle at that device index wasn't found.
 
+### ADS-B page shows no aircraft
+1. Make sure the SDR is switched to ADS-B mode on the home page (or `ADSB_ENABLE=1` with a dedicated dongle).
+2. Set `ADSB_LAT` / `ADSB_LON` to your location — this enables faster position decoding via single-message CPR. Without it, two messages (odd + even) are required per aircraft.
+3. Aircraft near the ground or far away may not have position data yet — they'll appear in the sidebar list even without map markers.
+4. Check server logs for `ADSBDecoder started` and that `rtl_adsb` is in `$PATH`.
+
 ### Two dongles but airband and DMR interfere / crash
-Both are trying to open the same device index. Verify the device indices with `rtl_test -d 0` and `rtl_test -d 1`. Set udev rules (see Setup) to pin serial numbers.
+Both are trying to open the same device index. Verify with `rtl_test -d 0` and `rtl_test -d 1`. Set udev rules (see Setup) to pin serial numbers.
 
 ### Waterfall / WebSocket errors in browser console
 Stale frontend build. Hard-refresh (`Ctrl+Shift+R`) or rebuild:
@@ -268,45 +294,68 @@ Two root causes fixed in v0.0.3: DSD output buffering (fixed with `stdbuf -oL`) 
 4. Set `MESH_PORT=/dev/ttyUSB0` explicitly if auto-detect is missing the device.
 5. Watch the server log — you should see `Meshtastic connected — device=/dev/ttyUSB0` within a few seconds of plugging in.
 
-### Meshtastic nodes appear but map is empty
-Nodes without a GPS fix have no position and won't appear on the map. The node list will still show them. The map auto-centres when the first node with a GPS lock is heard — this can take a minute after the device boots.
-
 ---
 
 ## Architecture
 
 ```
-Dongle 0 (DMR, ~440 MHz)
-    └── rtl_tcp :1234
-            └── SDREngine (device_index=0)
-                    ├── FFT ×4 → /ws/waterfall → browser canvas
-                    └── fm_demodulate → PCM 48 kHz
-                            └── DMRDecoder (dsd-fme)
-                                    ├── stderr → DMRFrame → /ws/dmr → browser
-                                    │       └── src_id → RadioID.net + Nominatim → MapPanel
-                                    └── WAV (stereo 8 kHz) → mix mono → pace → /ws/audio → AudioWorklet
+Device 0 — mode-switchable (home page toggle)
+  ├─ [DMR mode — default]
+  │    └── rtl_tcp :1234
+  │            └── SDREngine (device_index=0)
+  │                    ├── FFT ×4 → /ws/waterfall → browser canvas
+  │                    └── fm_demodulate → PCM 48 kHz
+  │                            └── DMRDecoder (dsd-fme)
+  │                                    ├── stderr → DMRFrame → /ws/dmr → browser
+  │                                    │       └── src_id → RadioID.net + Nominatim → MapPanel
+  │                                    └── WAV (stereo 8 kHz) → mix mono → pace → /ws/audio → AudioWorklet
+  │
+  ├─ [Airband mode]
+  │    └── rtl_tcp :1234
+  │            └── SDREngine (device_index=0)
+  │                    └── am_demodulate → PCM 48 kHz (gated by squelch)
+  │                            └── AirbandScanner
+  │                                    ├── channel scanner (dwell / hold / hang)
+  │                                    └── PCM + status → /ws/airband → AudioWorklet + freq list UI
+  │
+  └─ [ADS-B mode]
+       └── rtl_adsb -d 0
+               └── ADSBDecoder (pyModeS)
+                       ├── DF-17 decode → ICAO, callsign, alt, position (CPR), velocity
+                       ├── aircraft registry (60-pt track, 60s expiry)
+                       └── aircraft updates → /ws/adsb → Leaflet map + detail panel
 
-Dongle 1 (Airband, 118–137 MHz)
-    └── rtl_tcp :1235
-            └── SDREngine (device_index=1)
-                    └── am_demodulate → PCM 48 kHz (gated by squelch)
-                            └── AirbandScanner
-                                    ├── channel scanner (dwell / hold / hang)
-                                    ├── squelch gate (audio RMS threshold)
-                                    └── PCM + status → /ws/airband → AudioWorklet + freq list UI
+Device 1 (Airband, 118–137 MHz) — optional dedicated dongle
+  └── rtl_tcp :1235
+          └── AirbandScanner (device_index=1, independent of mode switcher)
 
-Heltec V3 (Meshtastic, LoRa)
-    └── USB serial /dev/ttyUSB0
-            └── meshtastic.SerialInterface
-                    └── MeshtasticHandler (pubsub → asyncio bridge)
-                            ├── node registry (NODEINFO / POSITION / TELEMETRY)
-                            ├── message log (TEXT_MESSAGE)
-                            └── node_update / message / status → /ws/meshtastic → node map + message log
+Device 2 (ADS-B, 1090 MHz) — optional dedicated dongle (ADSB_ENABLE=1)
+  └── rtl_adsb -d 2
+          └── ADSBDecoder (independent of mode switcher)
+
+Heltec V3 (Meshtastic, LoRa) — no SDR
+  └── USB serial /dev/ttyUSB0
+          └── meshtastic.SerialInterface
+                  └── MeshtasticHandler (pubsub → asyncio bridge)
+                          ├── node registry (NODEINFO / POSITION / TELEMETRY)
+                          ├── message log (TEXT_MESSAGE)
+                          └── node_update / message / status → /ws/meshtastic → node map + message log
 ```
 
 ---
 
 ## Version History
+
+### 0.1.4_THEPLANES — 2026-06-04
+- **ADS-B aircraft tracking** — live map of 1090 MHz transponder broadcasts.
+  - `backend/adsb.py` (new): `ADSBDecoder` — subprocess wraps `rtl_adsb`; parses `*HEXMSG;` output; decodes DF-17 Extended Squitter via `pyModeS`; callsign (TC 1-4), CPR airborne position (TC 9-18, two-message odd/even pair + single-message reference fallback), velocity/heading/vrate (TC 19); aircraft registry with 60-point track history; prunes stale contacts after 60 s.
+  - `backend/main.py`: `ADSB_ENABLE`, `ADSB_RTL_DEV`, `ADSB_GAIN`, `ADSB_LAT`, `ADSB_LON` env vars; `adsb_decoder` global (dedicated dongle) + `_mode_adsb` (mode-switched); `on_adsb_aircraft` callback; `/ws/adsb` WebSocket (snapshot on connect, then live updates); `GET /api/adsb/aircraft`, `GET /api/adsb/status`.
+  - `backend/requirements.txt`: `pyModeS` added.
+  - `frontend/src/pages/ADSBPage.tsx`: CartoDB Dark Matter Leaflet map; `✈` markers rotated to heading, colour-coded by altitude (green/cyan/blue/white); click → gold highlight + track polyline; detail panel (callsign, ICAO, altitude, speed, heading, vertical rate); aircraft list sorted by altitude; `MapFitter` auto-fits bounds on first data; stale aircraft fade at 45 s.
+- **SDR mode switcher** — home page toggle switches device 0 between DMR, Airband, and ADS-B without a server restart.
+  - `POST /api/sdr/mode?mode=dmr|airband|adsb` — clean stop-then-start with automatic DMR rollback on failure.
+  - `GET /api/sdr/mode` — returns active mode.
+  - `frontend/src/pages/Home.tsx`: three-button toggle (DMR / Airband / ADS-B); loading state during switch; active mode highlighted green.
 
 ### 0.1.3_s3ndIt — 2026-05-17
 - **Meshtastic send messages** — two-way messaging from the dashboard.
@@ -315,86 +364,33 @@ Heltec V3 (Meshtastic, LoRa)
   - `frontend`: compose bar with text input (Enter to send), channel picker (real names from device), 228-byte character counter, send button. DM mode — select a node in the list to address a direct message; compose shows `→ ShortName` pill, Escape/× cancels to broadcast. Sent messages echoed optimistically to the log in green as "You". Send error banner auto-dismisses after 4 s. Message panel height 140 → 220 px.
 
 ### 0.1.2_m3shPAPI — 2026-05-17
-- **Meshtastic handler field corrections** — verified against meshtastic 2.7.8 package source before first live connection; fixed three bugs that would have silently misbehaved on real hardware:
-  - `_pos_float()` helper: prefers post-`_fixupPosition` `latitude`/`longitude` floats; falls back to `latitudeI`/`longitudeI` integers with explicit `is not None` guard (old `if lat_i:` dropped valid `0.0` coordinates).
-  - `_node_from_iface`: `environmentMetrics` now seeded from `iface.nodes` on connect (was always `None` previously).
-  - `_cb_connect`: local node ID via `interface.localNode.nodeNum` (correct 2.7.x path); `myInfo.myNodeNum` (camelCase, wrong) → `myInfo.my_node_num` fallback.
-- **`test_meshtastic.py`** — smoke test script: connect, dump full node DB, listen 30 s for live packets, exit cleanly.
-- **Home page** — Airband and Meshtastic cards updated from `coming-soon` to `live`; live cards reordered (DMR, Airband, Meshtastic); hardware hints removed from live cards; descriptions updated.
-- **`/api/sysinfo` version string** — corrected from stale `0.0.8-1` to current version.
-- **Confirmed live on hardware** — Heltec WiFi LoRa 32 V3 connected on `/dev/ttyUSB0`; 200-node mesh DB loaded on connect; TELEMETRY, POSITION, and STORE_FORWARD packets received in first 30 s.
+- **Meshtastic handler field corrections** — verified against meshtastic 2.7.8 package source before first live connection; fixed three bugs that would have silently misbehaved on real hardware.
+- **`test_meshtastic.py`** — smoke test script.
+- **Home page** — Airband and Meshtastic cards updated from `coming-soon` to `live`.
+- **Confirmed live on hardware** — Heltec WiFi LoRa 32 V3 connected on `/dev/ttyUSB0`; 200-node mesh DB loaded on connect.
 
 ### 0.1.1_m3shd4ddY — 2026-05-16
 - **Meshtastic mesh monitor** — full implementation replacing the placeholder page.
-  - `backend/meshtastic_handler.py` (new): `MeshtasticHandler` — connects via USB serial using the `meshtastic` Python package; auto-detects port or uses `MESH_PORT` env var; retries every 10 s when no device found; pypubsub callbacks bridged to asyncio via `run_coroutine_threadsafe`; decodes `NODEINFO`, `POSITION`, `TELEMETRY`, `TEXT_MESSAGE`; seeds node registry from `iface.nodes` on connect; graceful no-op if package absent.
-  - `backend/main.py`: `/ws/meshtastic` WS (full node list + recent messages on connect, then live frames); `GET /api/meshtastic/status`, `/nodes`, `/messages`; handler in lifespan with graceful fallback.
-  - `frontend/src/pages/MeshtasticPage.tsx`: node list (sorted by last-heard, online/offline dot, battery colour coding, SNR, hops, temp/humidity), Leaflet map (cyan remote pins, purple local pin, `MapAutoCenter` flies to first GPS fix), message log with auto-scroll, WS reconnect on close.
-  - `backend/requirements.txt`: `meshtastic` added.
-  - `frontend/src/App.css`: Meshtastic styles.
-- **ROADMAP.md**: Meshtastic marked ✅, moved from roadmap to feature status; priority list updated.
-- **README**: Meshtastic added to feature table, features section, hardware, dependencies, setup (serial/dialout), config table, troubleshooting, architecture diagram.
 
 ### 0.1-1_itbegins — 2026-05-16
 - **Airband AM scanner** — full implementation replacing the placeholder page.
-  - `backend/airband.py` (new): `AirbandScanner` class — owns an independent `rtl_tcp` instance on device 1/port 1235; cycles a channel list with configurable dwell time; squelch based on audio RMS with 1 s hang after signal drops; gated audio output (PCM only streamed when squelch open).
-  - `backend/sdr.py`: `am_demodulate()` method (IQ → freq shift → decimate 2.4 MHz→48 kHz → `abs()` envelope → 3.5 kHz LPF → DC remove → AGC → int16 PCM); `device_index` param wired to `rtl_tcp -d` flag.
-  - `backend/main.py`: `/ws/airband` WebSocket (mixed binary PCM + JSON status frames); REST endpoints `GET /api/airband/status`, `POST /api/airband/squelch`, `POST /api/airband/scan`, `POST /api/airband/channel/{idx}`; scanner integrated into lifespan with graceful fallback if device not found.
-  - `frontend/src/pages/AirbandPage.tsx`: frequency list with active-channel highlight and RX blink animation, AudioWorklet audio player at 48 kHz, squelch slider, scanner toggle, setup hint when dongle not available.
-  - `frontend/src/components/AudioPlayer.tsx`: parametrized with `wsPath`, `inputRate`, `label` props (defaults preserve DMR behaviour); binary-only guard on `onmessage` to ignore JSON status frames.
-- **ROADMAP.md**: airband marked ✅; DMR audio choppiness warning added; multi-dongle warning with device/port table, udev rules documentation, and single-dongle workaround; priority list updated.
-- **README**: warnings section added (DMR audio, multi-dongle); airband added to feature table; architecture diagram updated; setup section expanded with udev rules and airband env var reference.
 
 ### 0.0.911 — 2026-05-15
-- README rewrite — new "What's Built" status table and "Where We're Going" roadmap summary; reflects current working state and pre-beta target feature set.
-- GitHub repo description updated to reflect multi-mode scope.
-- No code changes from 0.0.9_DASHBOARDASSEMBLE.
+- README rewrite and GitHub repo description update.
 
 ### 0.0.9_DASHBOARDASSEMBLE — 2026-05-15
-- **Home page** — landing page at `/` with mode cards for all five dashboard modes.
-- **Multi-page routing** — `react-router-dom` v6; `NavLink`-based top nav bar persists across all pages.
-- **Per-mode pages** — `/dmr`, `/adsb`, `/aprs`, `/meshtastic`, `/airband`. DMR page is the full existing dashboard; coming-soon pages list planned features.
-- **System info** — `GET /api/sysinfo` returns hostname, local LAN IP, Tailscale IP, and version string. Displayed on the home page hero.
-
-### 0.0.8-1_THEYMISSEDTHEBARN — 2026-05-14
-- **ROADMAP.md added** — full pre-beta roadmap covering ADS-B, APRS, Meshtastic, and airband AM reception.
-- **`.gitignore` updated** — `call_history.json` and `recordings/` excluded.
-
-### 0.0.8_stormtrooper — 2026-05-14
-- **Call history panel** — persistent log of all completed DMR calls with time, duration, TG, callsign, name, city/state. Persisted to `call_history.json`, 200-call rolling window.
-- **Call detection** — start on first VC* frame with non-zero `src_id`; end on next VLC header.
-- **RadioID enrichment at call-end** — name/location always present in stored record.
-- **Two-column layout** — signal panels in left flex column; call history in fixed 340 px right column.
-- **Audio: PACE_AHEAD raised** 100 ms → 500 ms; worklet re-prime removed; initial buffer raised 150 ms → 500 ms.
-
-### 0.0.6_th3d3vi1 — 2026-05-13
-- **Waterfall click/touch-to-tune** — click or tap tunes to that frequency instantly.
-- **Memory channels** — persistent channel bank (localStorage); save/recall/delete frequency+gain presets.
-- **State lifted to App** — `freq`/`gain` in `App.tsx`; single `tuneTo(f, g)` path keeps all controls in sync.
-
-### 0.0.6_thedarkphoenixrises — 2026-05-13
-- **Fix: Audio silent on non-localhost HTTP** — `AudioWorklet.addModule()` blocked on plain HTTP. Two-path player: AudioWorklet on secure contexts, scheduled `AudioBufferSourceNode` fallback on plain HTTP.
-
-### 0.0.5-2FIXEDPHOENIX — 2026-05-12
-- **Fix: DMR panel active call freezes** — `lastSrcRef` never reset between transmissions; same caller on re-key failed the `!== lastSrcRef` guard. Fixed by resetting to 0 on VLC frame.
-
-### 0.0.5-1WORKINGPHOENIX — 2026-05-12
-- **Fix: FM demodulation channel filter ineffective** — 64-tap FIR at 2.4 MHz gave −0.7 dB at 12.5 kHz. Moved LPF to 48 kHz (post-decimation) where same taps give −72 dB. 53 ms headroom per chunk.
-- **Fix: Irregular WAV chunk sizes** — `dsd-fme` writes 640-byte bursts; reader now accumulates into a bytearray and emits fixed-size chunks only.
-- **Fix: Audio playback replaced with AudioWorklet** — dedicated real-time audio thread; gapless; linear-interp resample from 8 kHz.
-
-### 0.0.5_WORLDWIDEBBY — 2026-05-11
-- **Live caller map** — CartoDB Dark Matter tiles, Nominatim geocoding, glowing pins, callsign popups.
+- Home page, multi-page routing, per-mode pages, `/api/sysinfo`.
 
 ### Earlier versions
-See full changelog in [previous README entries](https://github.com/sinetec6969/hampi-dashboard/commits/master) for 0.0.4-x, 0.0.3, and 0.0.2.
+See full changelog in [git history](https://github.com/sinetec6969/hampi-dashboard/commits/master) for 0.0.8 and earlier.
 
 ---
 
 ## Version 1.0 Roadmap
 
 ### Signal & Decoding
-- [ ] ADS-B live aircraft map (`dump1090-fa`, third dongle)
-- [ ] APRS decode (`direwolf`, fourth dongle or DMR time-share)
+- [x] ADS-B live aircraft map (`rtl_adsb` + `pyModeS`) ← done in 0.1.4_THEPLANES
+- [ ] APRS decode (`direwolf`, dedicated dongle or mode-switch)
 - [x] Meshtastic node monitor (USB serial, no SDR) ← done in 0.1.1_m3shd4ddY
 - [ ] Trunked DMR system support (control channel parsing)
 - [ ] P25 Phase 1 & 2, NXDN, D-STAR

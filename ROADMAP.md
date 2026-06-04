@@ -2,8 +2,8 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.1.3_s3ndIt (2026-05-17)  
-> **Status:** Pre-beta. DMR voice decode, call history, caller map, multi-page dashboard shell, AM airband scanner, and Meshtastic mesh monitor are all live. DMR audio playback is work-in-progress (see warnings below).
+> **Current version:** 0.1.4_THEPLANES (2026-06-04)  
+> **Status:** Pre-beta. DMR voice decode, airband AM scanner, ADS-B aircraft tracking, and Meshtastic mesh monitor are all live. DMR audio playback is work-in-progress (see warnings below). SDR mode switcher lets a single dongle serve any of the three SDR modes.
 
 ---
 
@@ -19,19 +19,16 @@ Suspected causes under investigation:
 
 Workaround: restart the server to reset the audio pipeline; audio tends to be cleaner in the first few minutes of a session.
 
-### Multiple SDR Dongles Required for Simultaneous Modes
-Each active receive mode (DMR, airband, ADS-B, APRS) needs its own RTL-SDR dongle running a dedicated `rtl_tcp` instance. **You cannot run two modes on the same dongle simultaneously.**
+### SDR Mode Switching — One Mode Per Dongle
+The home-page SDR toggle switches device 0 between DMR, Airband AM, and ADS-B. Only one mode can be active per dongle at a time. For simultaneous operation:
 
-| Mode | Default device | Default port |
-|---|---|---|
-| DMR | device 0 | 1234 |
-| Airband | device 1 | 1235 |
-| ADS-B | dedicated (dump1090) | — |
-| APRS | device 2 (planned) | 1236 |
+| Dongles | What runs simultaneously |
+|---|---|
+| 1 | Any one mode (switch on home page) |
+| 2 | DMR (device 0) + Airband (device 1) |
+| 3 | DMR + Airband + ADS-B (`ADSB_ENABLE=1 ADSB_RTL_DEV=2`) |
 
-**Single-dongle workaround:** Set `AIRBAND_RTL_DEV=0` to share the DMR dongle — but you must stop/restart the server to switch modes. They cannot be active at the same time.
-
-**udev rules are essential** on multi-dongle setups to prevent dongles from swapping device indices across reboots. Without them, a reboot may assign DMR's dongle to airband and vice versa. See Infrastructure section below.
+**udev rules are essential** on multi-dongle setups to prevent dongles from swapping device indices across reboots.
 
 ---
 
@@ -45,32 +42,71 @@ Each active receive mode (DMR, airband, ADS-B, APRS) needs its own RTL-SDR dongl
 **SDR dongles — current and planned:**
 | Dongle | Band | Mode | Status |
 |---|---|---|---|
-| 0 | ~430–440 MHz | DMR | ✅ Working |
-| 1 | 118–137 MHz | Airband AM | ✅ Implemented |
-| 2 | 1090 MHz | ADS-B (`dump1090`) | Planned |
+| 0 | ~430–440 MHz | DMR (default) | ✅ Working |
+| 0 | 118–137 MHz | Airband AM (mode-switch) | ✅ Working |
+| 0 | 1090 MHz | ADS-B (mode-switch) | ✅ Working |
+| 1 | 118–137 MHz | Airband AM (dedicated) | ✅ Working |
+| 2 | 1090 MHz | ADS-B (dedicated, `ADSB_ENABLE=1`) | ✅ Working |
 | 3 | 144.390 MHz | APRS (`direwolf`) | Planned |
 
 ---
 
 ## Feature Status
 
+### ✅ ADS-B Aircraft Tracking
+
+Decode 1090 MHz ADS-B transponder broadcasts and display live aircraft traffic on a map.
+
+**Implemented (0.1.4_THEPLANES):**
+- `adsb.py` — `ADSBDecoder`: subprocess wraps `rtl_adsb`; parses `*HEXMSG;` hex output; filters DF-17 Extended Squitter; decodes via `pyModeS` — callsign (TC 1-4), CPR airborne position with two-message odd/even pair decoding + single-message reference fallback, velocity/heading/vrate (TC 19); aircraft registry with 60-point track history per aircraft; prune loop expires contacts after 60 s
+- `main.py` — `ADSB_ENABLE/RTL_DEV/GAIN/LAT/LON` env vars; dedicated-dongle and mode-switched instances; `/ws/adsb` (snapshot on connect + live updates); `GET /api/adsb/aircraft`, `GET /api/adsb/status`
+- `ADSBPage.tsx` — CartoDB Dark Matter Leaflet map; `✈` icons rotated to heading, altitude colour-coded; click → gold highlight + track polyline + detail panel; aircraft list sorted by altitude; `MapFitter` auto-fits on first data; stale fade at 45 s
+
+**Configuration (env vars):**
+```
+ADSB_ENABLE=0       # 1 = start dedicated decoder on boot (needs own dongle)
+ADSB_RTL_DEV=2      # device index for dedicated dongle (default: 2)
+ADSB_GAIN=-1        # tuner gain, negative = auto (default: auto)
+ADSB_LAT=0.0        # reference latitude — enables faster CPR position decode
+ADSB_LON=0.0        # reference longitude
+```
+
+Without `ADSB_ENABLE=1`, ADS-B is available via the SDR mode switcher (device 0, stops DMR while active).
+
+**Known limitations:**
+- No squawk/emergency flag display yet
+- No ICAO → airline/registration database lookup
+- Surface position frames (TC 5-8) not decoded
+
+---
+
+### ✅ SDR Mode Switcher
+
+Switch device 0 between DMR, Airband AM, and ADS-B from the home page without a server restart.
+
+**Implemented (0.1.4_THEPLANES):**
+- `POST /api/sdr/mode?mode=dmr|airband|adsb` — stops active mode cleanly, starts new one; automatic DMR rollback on failure
+- `GET /api/sdr/mode` — returns current mode
+- Home page three-button toggle with loading state and active-mode highlight
+
+---
+
 ### ✅ Airband AM Reception
 
 Receive VHF airband voice (118–137 MHz) with AM demodulation and channel scanner.
 
-**Implemented:**
-- `sdr.py` — `am_demodulate()`: IQ → freq shift → decimate 2.4 MHz→48 kHz → envelope detection (`abs`) → 3.5 kHz LPF → DC remove → AGC → int16 PCM at 48 kHz
-- `airband.py` — `AirbandScanner`: owns its own `rtl_tcp` instance; cycles channel list with configurable dwell; holds on squelch break + 1 s hang; gated audio (only streams PCM when squelch is open)
-- `backend/main.py` — `/ws/airband` WebSocket (mixed binary PCM + JSON status frames); REST endpoints: `GET /api/airband/status`, `POST /api/airband/squelch`, `POST /api/airband/scan`, `POST /api/airband/channel/{idx}`
-- `frontend/src/pages/AirbandPage.tsx` — frequency list with active-channel highlight + RX blink, audio player (AudioWorklet), squelch slider, scanner toggle
-- `AudioPlayer.tsx` — parametrized (`wsPath`, `inputRate`, `label`) for reuse across modes
+**Implemented (0.1-1_itbegins):**
+- `sdr.py` — `am_demodulate()`: IQ → freq shift → decimate 2.4 MHz→48 kHz → envelope detection → 3.5 kHz LPF → DC remove → AGC → int16 PCM at 48 kHz
+- `airband.py` — `AirbandScanner`: owns its own `rtl_tcp` instance; cycles channel list with configurable dwell; holds on squelch break + 1 s hang; gated audio output
+- `main.py` — `/ws/airband` WebSocket; `GET /api/airband/status`, `POST /api/airband/squelch`, `POST /api/airband/scan`, `POST /api/airband/channel/{idx}`
+- `AirbandPage.tsx` — frequency list, AudioWorklet player, squelch slider, scanner toggle
 
 **Configuration (env vars):**
 ```
 AIRBAND_ENABLE=1          # 1 = start scanner on boot (default: 1)
 AIRBAND_RTL_DEV=1         # RTL-SDR device index (default: 1)
 AIRBAND_RTL_PORT=1235     # rtl_tcp port (default: 1235)
-AIRBAND_GAIN=40.0         # tuner gain dB (default: 40.0)
+AIRBAND_GAIN=40.0         # tuner gain dB
 AIRBAND_SQUELCH=0.01      # squelch threshold — tune for your noise floor
 AIRBAND_DWELL_MS=2000     # ms per channel when scanning
 ```
@@ -78,96 +114,49 @@ AIRBAND_DWELL_MS=2000     # ms per channel when scanning
 **Known limitations:**
 - Channel list is hardcoded (Guard, CTAF, Center, Departure) — `config.yaml` support planned
 - No ATIS text decode
-- Squelch is audio-RMS based — works well for AM voice; may need adjustment near strong carriers
 
 ---
 
 ### ✅ Meshtastic Mesh Monitor
 
-Monitor a Meshtastic LoRa mesh network — node positions, messages, and telemetry — via USB serial.
+Monitor a Meshtastic LoRa mesh network via USB serial.
 
-**Implemented:**
-- `backend/meshtastic_handler.py` (new): `MeshtasticHandler` — connects to a Meshtastic device via USB serial using the `meshtastic` Python package; auto-detects port or uses `MESH_PORT` env var; retries every 10 s if no device found; pypubsub callbacks (`NODEINFO`, `POSITION`, `TELEMETRY`, `TEXT_MESSAGE`) bridged to asyncio via `run_coroutine_threadsafe`; maintains node registry seeded from `iface.nodes` on connect; graceful no-op if package is absent
-- `backend/main.py` — `/ws/meshtastic` WebSocket; REST: `GET /api/meshtastic/status`, `/nodes`, `/messages`, `/channels`; `POST /api/meshtastic/send`
-- `frontend/src/pages/MeshtasticPage.tsx` — node list, Leaflet map, message log, compose bar with channel picker and DM mode
-- `meshtastic_handler.py` — `send_text()`, `get_channels()` (reads named channels from `localNode.channels` protobuf)
-
-**Send messages (added 0.1.3_s3ndIt):**
-- Compose bar: text input, Enter to send, 228-byte UTF-8 counter, channel picker with real names from device
-- DM mode: click a node → `→ ShortName` pill; sends to that node ID; Escape cancels to broadcast
-- Sent messages echoed optimistically to the log in green
+**Implemented (0.1.1_m3shd4ddY / 0.1.3_s3ndIt):**
+- `meshtastic_handler.py` — `MeshtasticHandler`: USB serial auto-detect, pubsub→asyncio bridge, node registry, message log, `send_text()`, `get_channels()`
+- `main.py` — `/ws/meshtastic`, REST CRUD, send endpoint
+- `MeshtasticPage.tsx` — node list, Leaflet map, message log, compose bar with channel picker and DM mode
 
 **Configuration (env vars):**
 ```
 MESH_ENABLE=1          # 1 = start handler on boot (default: 1)
-MESH_PORT=             # serial port path — leave blank for auto-detect
-                       # e.g. MESH_PORT=/dev/ttyUSB0 to pin the Heltec V3
-```
-
-**Hardware note — Heltec WiFi LoRa 32 V3:**  
-The Heltec V3 uses a CP2102N USB-Serial chip and appears as `/dev/ttyUSB0` on the Pi. Auto-detect finds it without setting `MESH_PORT`. The Pi user must be in the `dialout` group to open the port:
-```bash
-sudo usermod -aG dialout $USER   # then log out and back in
+MESH_PORT=             # serial port — leave blank for auto-detect
 ```
 
 **Known limitations:**
-- TRACEROUTE packets are received but not displayed in the UI (logged only)
-- Node telemetry is displayed as current values; no sparkline history yet
+- TRACEROUTE packets received but not displayed
+- No telemetry sparkline history
 
 ---
 
 ## Pre-Beta Feature Roadmap
 
-### 1. ADS-B Dashboard
+### 1. APRS Decoding
 
-Decode aircraft transponder broadcasts on 1090 MHz and display live traffic on a map.
+Decode Automatic Packet Reporting System traffic on 144.390 MHz.
 
-**Requires: dedicated RTL-SDR dongle (device 2)**
-
-**Backend:**
-- Run `dump1090-fa` or `readsb` as a managed subprocess (same pattern as `rtl_tcp`)
-- Poll `dump1090` JSON output (`/run/dump1090-fa/aircraft.json`) at 1 Hz
-- WebSocket endpoint `/ws/adsb` — broadcast aircraft state vectors
-- REST endpoint `GET /api/aircraft` — current snapshot
-
-**Frontend:**
-- Dedicated ADS-B page/tab (or panel within the main dashboard)
-- Leaflet map — aircraft plotted as directional icons (heading-aware)
-- Click aircraft for callsign, squawk, altitude (ft/m), speed (kts), vertical rate, ICAO hex
-- Aircraft track history (last N positions drawn as a polyline)
-- Altitude colour-coded icons (ground / low / mid / high)
-- Table view alongside map: sortable by distance, altitude, callsign
-
-**Data:**
-- `dump1090` handles all ADS-B decoding natively — no additional decoder needed
-- Optional: feed to `tar1090` for a standalone ADS-B sub-page if desired
-- ICAO → airline/registration lookup via local `aircraft.json` database
-
----
-
-### 2. APRS Decoding
-
-Decode Automatic Packet Reporting System traffic on 144.390 MHz (North America) or regional equivalent.
-
-**Requires: dedicated RTL-SDR dongle (device 3 recommended, or time-share with DMR)**
+**Requires: dedicated RTL-SDR dongle (device 3) or time-share via SDR mode switcher**
 
 **Backend:**
-- `direwolf` as the TNC — receives FM-demodulated audio from the SDR, outputs APRS frames to stdout
+- `direwolf` as the TNC — FM-demodulated audio from SDR → decoded APRS frames on stdout
 - Parse APRS frames: position, weather, messages, objects, telemetry
-- Store last-heard positions per callsign (in-memory + JSON on disk)
 - WebSocket endpoint `/ws/aprs` — broadcast decoded packets
-- REST endpoint `GET /api/aprs/stations` — current station snapshot
+- REST endpoint `GET /api/aprs/stations`
 
 **Frontend:**
-- Dedicated APRS panel / tab
-- Leaflet map — stations plotted with standard APRS symbol icons
+- Leaflet map — stations with standard APRS symbol icons
 - Click station: callsign, last heard, comment, path, packet type
-- Packet log (scrollable, newest first): timestamp, callsign, type, raw or decoded summary
-- Weather packet display when WX data is present (temp, wind, rain)
-- Symbol icon set: use the standard APRS symbol tables (two-table system)
-
-**Notes:**
-- `direwolf` can also act as a digipeater / igate if ever desired — architecture supports it
+- Packet log: timestamp, callsign, type, decoded summary
+- Weather packet display (temp, wind, rain)
 
 ---
 
@@ -180,13 +169,13 @@ Decode Automatic Packet Reporting System traffic on 144.390 MHz (North America) 
 - [ ] Audio recording — save decoded voice to timestamped WAV files per call
 
 ### DMR Intelligence
-- [ ] Talkgroup alias file — CSV import mapping TG numbers to friendly names (e.g., "91 → Worldwide", "3116 → Texas")
-- [ ] Full RadioID.net database import — local SQLite snapshot for offline ID lookups (removes API rate limits and latency)
+- [ ] Talkgroup alias file — CSV import mapping TG numbers to friendly names
+- [ ] Full RadioID.net database import — local SQLite snapshot for offline ID lookups
 
 ### Infrastructure
-- [ ] Systemd service file — `hampi-dashboard.service` for auto-start on boot, restart on failure
-- [ ] Config file (`config.yaml` / `config.toml`) — frequencies, gain, talkgroup aliases, scan lists, squelch levels; replaces hard-coded env vars and airband channel list
-- [ ] udev rules — stable USB device aliases so dongle roles don't swap on reboot (critical for multi-dongle setups)
+- [ ] Systemd service file — `hampi-dashboard.service` for auto-start on boot
+- [ ] Config file (`config.yaml`) — frequencies, gain, talkgroup aliases, scan lists; replaces hard-coded env vars
+- [ ] udev rules — stable USB device aliases across reboots
 
 ---
 
@@ -197,23 +186,28 @@ Decode Automatic Packet Reporting System traffic on 144.390 MHz (North America) 
 - Each mode adds its own WebSocket endpoint(s) and REST routes
 - Static frontend served from `frontend/dist` — single React app with tab/page routing per mode
 
-### Frontend Routing
-- React Router: `/` (Home), `/dmr`, `/adsb`, `/aprs`, `/meshtastic`, `/airband`
-- Persistent nav bar across all pages
-- Each mode is an independently mounted React subtree; disconnects its WebSocket on unmount
+### SDR Mode Architecture
+Device 0 is managed by the mode switcher. Independent dedicated dongles are unaffected by it.
 
-### Multi-Dongle Architecture
-Each receive mode owns its own `SDREngine` → `rtl_tcp` subprocess pair. The `SDREngine` `device_index` parameter selects the hardware dongle; `rtl_tcp_port` must be unique per instance.
-
-**udev rules (example — add to `/etc/udev/rules.d/99-rtlsdr.rules`):**
 ```
-# Pin dongles by serial number so device indices are stable across reboots
+Device 0 (mode-switchable):
+  DMR     → rtl_tcp :1234 → SDREngine → DMRDecoder (dsd-fme)
+  Airband → rtl_tcp :1234 → SDREngine → AirbandScanner
+  ADS-B   → rtl_adsb -d 0 → ADSBDecoder (pyModeS)
+
+Device 1+ (dedicated, independent):
+  Airband → rtl_tcp :1235 → AirbandScanner
+  ADS-B   → rtl_adsb -d 2 → ADSBDecoder
+```
+
+### udev Rules (multi-dongle)
+```bash
+# /etc/udev/rules.d/99-rtlsdr.rules
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000001", SYMLINK+="rtlsdr0"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000002", SYMLINK+="rtlsdr1"
 ```
 
-Get dongle serial numbers with: `rtl_eeprom -d 0` and `rtl_eeprom -d 1`  
-Set serial numbers with: `rtl_eeprom -d 0 -s 00000001`
+Get serial: `rtl_eeprom -d 0` · Set serial: `rtl_eeprom -d 0 -s 00000001`
 
 ### Config File (planned)
 ```yaml
@@ -221,23 +215,17 @@ Set serial numbers with: `rtl_eeprom -d 0 -s 00000001`
 sdr:
   primary_freq: 438800000
   gain: 49.6
-  sample_rate: 2400000
 
 airband:
   rtl_device: 1
-  rtl_port: 1235
-  gain: 40.0
   squelch: 0.01
-  dwell_ms: 2000
   frequencies:
     - { freq: 121500000, label: "Guard" }
     - { freq: 123450000, label: "CTAF" }
-    - { freq: 126200000, label: "Center" }
-    - { freq: 132850000, label: "Departure" }
 
-aprs:
-  freq: 144390000
-  rtl_device: 2
+adsb:
+  lat_ref: 30.2
+  lon_ref: -97.7
 
 talkgroups:
   91: "Worldwide"
@@ -245,22 +233,16 @@ talkgroups:
   3116: "Texas"
 ```
 
-### Hardware / OS
-- Migrate to Pi 5 (8 GB) before adding ADS-B + APRS simultaneously
-- Blacklist `dvb_usb_rtl28xxu` permanently (`/etc/modprobe.d/rtlsdr.conf`) to prevent USB re-grab on connect
-- Assign each SDR dongle a stable USB alias via udev rules (see above)
-- `systemd` service per long-running subprocess (`rtl_tcp`, `dump1090`, `direwolf`) with `Restart=on-failure`
-
 ---
 
-## Priority Order (updated)
+## Priority Order (updated 2026-06-04)
 
 1. **Fix DMR audio choppiness** — blocking for usable voice monitoring
 2. **Systemd + config.yaml** — quality of life; stops manual env-var sessions, makes channel list editable
 3. **udev rules** — required for stable multi-dongle operation
-4. **ADS-B** — third dongle; `dump1090` does all the heavy lifting; high visual impact
-5. **APRS** — fourth dongle or time-share; `direwolf` handles decoding
-6. **Talkgroup aliases + RadioID local DB** — DMR polish
-7. **Full beta tag**
+4. **APRS** — `direwolf` handles decoding; can time-share device 0 via mode switcher
+5. **Talkgroup aliases + RadioID local DB** — DMR polish
+6. **Full beta tag**
 
+✅ ~~ADS-B~~ — implemented in 0.1.4_THEPLANES  
 ✅ ~~Meshtastic~~ — implemented in 0.1.1_m3shd4ddY
