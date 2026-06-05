@@ -1,42 +1,26 @@
-"""
-adsb.py - ADS-B decoder backed by rtl_adsb subprocess + pyModeS.
-
-Runs rtl_adsb, parses hex messages, decodes via pyModeS, maintains a live
-aircraft registry keyed by ICAO hex, and fires aircraft_callback on updates.
-Stale aircraft (unseen for EXPIRE_S) are pruned periodically.
-
-Position decoding uses CPR two-message decoding (odd+even pair) with an
-optional lat/lon reference fallback (set ADSB_LAT / ADSB_LON env vars).
-"""
-
 import asyncio
 import logging
 import time
 from typing import Callable, Awaitable, Optional
 
 import pyModeS as pms
+import pyModeS.position as pms_pos
 
 logger = logging.getLogger(__name__)
 
-EXPIRE_S  = 60.0   # remove aircraft unseen for this many seconds
-PRUNE_S   = 15.0   # prune-loop interval
-MAX_TRACK = 60     # max position history points per aircraft
-
+EXPIRE_S  = 60.0
+PRUNE_S   = 15.0
+MAX_TRACK = 60
 
 AircraftCb = Callable[[dict], Awaitable[None]]
 
 
 class ADSBDecoder:
-    """
-    Wraps rtl_adsb subprocess, decodes ADS-B messages via pyModeS, and
-    maintains a live aircraft dict keyed by ICAO hex.
-    """
-
     def __init__(
         self,
         device_index: int = 2,
-        gain: float = -1.0,       # negative = auto gain
-        lat_ref: float = 0.0,     # reference position for CPR fallback
+        gain: float = -1.0,
+        lat_ref: float = 0.0,
         lon_ref: float = 0.0,
         aircraft_callback: Optional[AircraftCb] = None,
     ):
@@ -52,10 +36,6 @@ class ADSBDecoder:
         self._read_task:  Optional[asyncio.Task] = None
         self._prune_task: Optional[asyncio.Task] = None
         self._active      = False
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     async def start(self) -> None:
         cmd = ["rtl_adsb", "-d", str(self.device_index)]
@@ -95,12 +75,7 @@ class ADSBDecoder:
         logger.info("ADSBDecoder stopped")
 
     def aircraft_list(self) -> list[dict]:
-        """Return current aircraft as a list, excluding internal CPR state."""
         return [_public(ac) for ac in self.aircraft.values()]
-
-    # ------------------------------------------------------------------
-    # Internal loops
-    # ------------------------------------------------------------------
 
     async def _read_loop(self) -> None:
         while self._active and self._proc:
@@ -128,20 +103,16 @@ class ADSBDecoder:
             if stale and self._cb:
                 await self._cb({"type": "prune", "expired": stale})
 
-    # ------------------------------------------------------------------
-    # Message decoding
-    # ------------------------------------------------------------------
-
     async def _process(self, msg: str) -> None:
         try:
             if len(msg) < 14:
                 return
-            df = pms.df(msg)
-            if df != 17:          # DF-17 = Extended Squitter (ADS-B only)
+            m = pms.Message(msg)
+            if m.df != 17:
                 return
 
-            icao = pms.icao(msg).lower()
-            tc   = pms.adsb.typecode(msg)
+            icao = m.icao.lower()
+            tc   = m.typecode
 
             if icao not in self.aircraft:
                 self.aircraft[icao] = {
@@ -155,77 +126,83 @@ class ADSBDecoder:
                     "vrate":     None,
                     "last_seen": time.time(),
                     "track":     [],
-                    # internal CPR state — excluded from aircraft_list()
-                    "_cpr_odd":  None,
+                    "_cpr_odd":  None,   # (cpr_lat, cpr_lon, t)
                     "_cpr_even": None,
                 }
 
             ac           = self.aircraft[icao]
             ac["last_seen"] = time.time()
 
+            d = m.decode()
+
             # Identification (callsign)
             if 1 <= tc <= 4:
-                cs = pms.adsb.callsign(msg).strip()
+                cs = d.get("callsign", "").strip()
                 if cs:
                     ac["callsign"] = cs
 
             # Airborne position
             elif 9 <= tc <= 18:
-                alt = pms.adsb.altitude(msg)
+                alt = d.get("altitude")
                 if alt is not None:
                     ac["altitude"] = alt
 
-                oe  = pms.adsb.oe_flag(msg)
-                now = time.time()
-                if oe == 1:
-                    ac["_cpr_odd"]  = (msg, now)
-                else:
-                    ac["_cpr_even"] = (msg, now)
+                cpr_lat = d.get("cpr_lat")
+                cpr_lon = d.get("cpr_lon")
+                cpr_fmt = d.get("cpr_format")
 
-                pos = None
-                odd, even = ac["_cpr_odd"], ac["_cpr_even"]
+                if cpr_lat is not None and cpr_lon is not None:
+                    now = time.time()
+                    if cpr_fmt == 1:
+                        ac["_cpr_odd"]  = (cpr_lat, cpr_lon, now)
+                    else:
+                        ac["_cpr_even"] = (cpr_lat, cpr_lon, now)
 
-                # Two-message CPR (preferred — works without reference position)
-                if odd and even and abs(odd[1] - even[1]) < 10:
-                    try:
-                        pos = pms.adsb.airborne_position(
-                            odd[0], even[0], odd[1], even[1]
-                        )
-                    except Exception:
-                        pass
+                    pos = None
+                    odd, even = ac["_cpr_odd"], ac["_cpr_even"]
 
-                # Single-message CPR with reference position (fallback)
-                if pos is None and (self.lat_ref or self.lon_ref):
-                    try:
-                        pos = pms.adsb.airborne_position_with_ref(
-                            msg, self.lat_ref, self.lon_ref
-                        )
-                    except Exception:
-                        pass
+                    if odd and even and abs(odd[2] - even[2]) < 10:
+                        try:
+                            pos = pms_pos.airborne_position_pair(
+                                even[0], even[1],
+                                odd[0],  odd[1],
+                                even_is_newer=(even[2] > odd[2]),
+                            )
+                        except Exception:
+                            pass
 
-                if pos:
-                    lat, lon = pos
-                    ac["lat"] = round(lat, 6)
-                    ac["lon"] = round(lon, 6)
-                    track = ac["track"]
-                    if (not track
-                            or abs(lat - track[-1][0]) > 1e-5
-                            or abs(lon - track[-1][1]) > 1e-5):
-                        track.append([round(lat, 5), round(lon, 5)])
-                        if len(track) > MAX_TRACK:
-                            track.pop(0)
+                    if pos is None and (self.lat_ref or self.lon_ref):
+                        try:
+                            pos = pms_pos.airborne_position_with_ref(
+                                cpr_fmt, cpr_lat, cpr_lon,
+                                self.lat_ref, self.lon_ref,
+                            )
+                        except Exception:
+                            pass
+
+                    if pos:
+                        lat, lon = pos
+                        ac["lat"] = round(lat, 6)
+                        ac["lon"] = round(lon, 6)
+                        track = ac["track"]
+                        if (not track
+                                or abs(lat - track[-1][0]) > 1e-5
+                                or abs(lon - track[-1][1]) > 1e-5):
+                            track.append([round(lat, 5), round(lon, 5)])
+                            if len(track) > MAX_TRACK:
+                                track.pop(0)
 
             # Airborne velocity
             elif tc == 19:
-                vel = pms.adsb.velocity(msg)
-                if vel:
-                    spd, hdg, vr, _ = vel
-                    if spd is not None:
-                        ac["speed"]   = round(spd)
-                    if hdg is not None:
-                        ac["heading"] = round(hdg)
-                    if vr is not None:
-                        ac["vrate"]   = round(vr)
+                spd = d.get("groundspeed")
+                hdg = d.get("track")
+                vr  = d.get("vertical_rate")
+                if spd is not None:
+                    ac["speed"]   = round(spd)
+                if hdg is not None:
+                    ac["heading"] = round(hdg)
+                if vr is not None:
+                    ac["vrate"]   = round(vr)
 
             if self._cb:
                 await self._cb({"type": "aircraft", "aircraft": _public(ac)})
@@ -235,5 +212,4 @@ class ADSBDecoder:
 
 
 def _public(ac: dict) -> dict:
-    """Return aircraft dict without internal CPR state fields."""
     return {k: v for k, v in ac.items() if not k.startswith("_")}

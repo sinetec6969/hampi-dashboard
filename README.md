@@ -4,8 +4,8 @@
 No cloud. No API keys. Everything runs on-device and serves to any browser on your LAN or Tailscale network.
 
 **Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme · meshtastic · pyModeS  
-**Version:** 0.1.4_THEPLANES  
-**Last updated:** 2026-06-04
+**Version:** 0.1.5_py3ModeS  
+**Last updated:** 2026-06-05
 
 ---
 
@@ -345,6 +345,13 @@ Heltec V3 (Meshtastic, LoRa) — no SDR
 ---
 
 ## Version History
+
+### 0.1.5_py3ModeS — 2026-06-05
+- **ADS-B fix: pyModeS v3 API migration** — `adsb.py` rewrote from scratch for pyModeS 3.3.0 which dropped the entire v2 function API (`pms.df()`, `pms.icao()`, `pms.adsb.*`). The v2 calls were silently crashing inside the decode loop (swallowed by broad `except`), so the decoder accepted messages but produced nothing.
+  - Now uses `pms.Message(hex)` → `.df`, `.icao`, `.typecode`, `.decode()` for per-message parsing.
+  - Position: `pyModeS.position.airborne_position_pair(even_lat, even_lon, odd_lat, odd_lon, even_is_newer=bool)` and `airborne_position_with_ref(fmt, cpr_lat, cpr_lon, lat_ref, lon_ref)` — both take raw CPR integer fields from `decode()`, not message objects.
+  - Velocity: extracted from `decode()` dict as `groundspeed` / `track` / `vertical_rate`.
+  - CPR state per aircraft now stores `(cpr_lat_raw, cpr_lon_raw, timestamp)` instead of `(msg_hex, timestamp)`.
 
 ### 0.1.4_THEPLANES — 2026-06-04
 - **ADS-B aircraft tracking** — live map of 1090 MHz transponder broadcasts.
