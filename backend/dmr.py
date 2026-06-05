@@ -2,11 +2,11 @@
 dmr.py - Async DMR decoder wrapping dsd-fme.
 
 dsd-fme command:
-    dsd-fme -i - -fs -w /tmp/dsd_audio.wav
+    dsd-fme -i - -fs -o udp:127.0.0.1:23456
 
-  -i -   read raw 48kHz int16 PCM from stdin (same as old dsd)
+  -i -   read raw 48kHz int16 PCM from stdin
   -fs    force DMR BS/MS Simplex (Tier II repeater)
-  -w     write decoded AMBE audio to WAV file (bypasses portaudio)
+  -o udp send decoded AMBE audio as raw 8kHz mono int16 UDP datagrams
 
 dsd-fme outputs ALL metadata to stderr (not stdout).
 stdout is ignored.  stderr contains lines like:
@@ -19,25 +19,24 @@ stdout is ignored.  stderr contains lines like:
 
 Timeslots: dsd-fme uses 1-indexed slot numbers (slot1=TS1, slot2=TS2).
 We store 0-indexed internally (subtract 1) to match frontend timeslot+1 display.
+
+Audio delivery: each AMBE frame fires a UDP datagram (~320 bytes, 20 ms of 8kHz
+mono int16) from dsd-fme to the Python listener.  No stdio buffering, no polling.
 """
 
 import asyncio
 import logging
-import os
 import re
+import socket as _socket
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Callable, Awaitable, Optional
 
-import numpy as np
-
 logger = logging.getLogger(__name__)
 
-AUDIO_WAV     = "/tmp/dsd_audio.wav"
-WAV_HDR_BYTES = 44
-AUDIO_CHUNK   = 3200   # 200 ms at 8000 Hz 16-bit
-AUDIO_POLL_S  = 0.02
+AUDIO_UDP_HOST = "127.0.0.1"
+AUDIO_UDP_PORT = 23456
 
 # --- Regex patterns for dsd-fme stderr output ----------------------------
 
@@ -108,7 +107,8 @@ class DMRFrame:
 class DMRDecoder:
     """Async wrapper around dsd-fme."""
 
-    DSD_ARGS = ["dsd-fme", "-i", "-", "-fs", "-w", AUDIO_WAV]
+    DSD_ARGS = ["dsd-fme", "-i", "-", "-fs", "-o",
+                f"udp:{AUDIO_UDP_HOST}:{AUDIO_UDP_PORT}"]
 
     def __init__(self, audio_callback: AudioCallback, meta_callback: MetaCallback,
                  call_end_callback: Optional[CallEndCallback] = None):
@@ -117,7 +117,6 @@ class DMRDecoder:
         self._call_end_cb = call_end_callback
         self._proc:       Optional[asyncio.subprocess.Process] = None
         self._tasks:      list[asyncio.Task] = []
-        self._audio_fh:   Optional[object]   = None
 
         # Per-slot persistent call context (1-indexed: slot 1 and 2)
         self._slot_ctx: dict[int, dict] = {
@@ -140,11 +139,6 @@ class DMRDecoder:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        try:
-            os.unlink(AUDIO_WAV)
-        except FileNotFoundError:
-            pass
-
         logger.info("Starting dsd-fme: %s", " ".join(self.DSD_ARGS))
         self._proc = await asyncio.create_subprocess_exec(
             *self.DSD_ARGS,
@@ -154,21 +148,9 @@ class DMRDecoder:
         )
         logger.info("dsd-fme started (pid=%d)", self._proc.pid)
 
-        for _ in range(50):
-            if os.path.exists(AUDIO_WAV):
-                break
-            await asyncio.sleep(0.1)
-
-        if os.path.exists(AUDIO_WAV):
-            self._audio_fh = open(AUDIO_WAV, "rb")
-            logger.info("Audio WAV file open")
-        else:
-            logger.warning("dsd-fme did not create audio WAV — STT disabled")
-            self._audio_fh = None
-
         self._tasks = [
-            asyncio.create_task(self._read_stderr(),    name="dfme-stderr"),
-            asyncio.create_task(self._read_audio_wav(), name="dfme-audio"),
+            asyncio.create_task(self._read_stderr(),   name="dfme-stderr"),
+            asyncio.create_task(self._read_audio_udp(), name="dfme-audio"),
         ]
 
     async def stop(self) -> None:
@@ -177,13 +159,6 @@ class DMRDecoder:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
-
-        if self._audio_fh:
-            try:
-                self._audio_fh.close()
-            except Exception:
-                pass
-            self._audio_fh = None
 
         if self._proc:
             try:
@@ -399,91 +374,31 @@ class DMRDecoder:
         except Exception:
             logger.exception("call_end_callback raised an exception")
 
-    async def _read_audio_wav(self) -> None:
-        """Stream decoded PCM from dsd-fme's WAV output file."""
-        if self._audio_fh is None:
-            return
+    async def _read_audio_udp(self) -> None:
+        """Receive decoded 8kHz mono int16 PCM from dsd-fme via UDP.
 
-        fh = self._audio_fh
-
-        header = b""
-        while len(header) < WAV_HDR_BYTES:
-            chunk = fh.read(WAV_HDR_BYTES - len(header))
-            if chunk:
-                header += chunk
-            else:
-                await asyncio.sleep(AUDIO_POLL_S)
-
-        channels = int.from_bytes(header[22:24], "little")
-        sr       = int.from_bytes(header[24:28], "little")
-        bits     = int.from_bytes(header[34:36], "little")
-        logger.info("Audio WAV ready — sample_rate=%d Hz, channels=%d, bits=%d", sr, channels, bits)
-
-        # Pacing: track audio-time sent vs wall-clock; reset on silence gap.
-        PACE_AHEAD  = 0.50   # max seconds ahead of real-time before throttling
-        GAP_RESET_S = 0.30   # silence longer than this resets the pacing reference
-        _pace_t0:      float = 0.0
-        _pace_bytes:   int   = 0
-        _last_data_t:  float = 0.0
-        mono_rate = sr * 2   # bytes/sec for mono int16 at sample rate sr
-
-        # Raw stereo byte buffer — accumulate here, only emit complete AUDIO_CHUNK
-        # blocks.  Partial reads from the WAV file (dsd-fme writes in DMR frame
-        # bursts of 640 bytes) would otherwise produce irregular chunk sizes and
-        # confuse the browser's Web Audio scheduler.
-        _buf = bytearray()
-
+        dsd-fme sends one datagram per AMBE frame (~320 bytes, 20 ms).
+        No buffering, no polling — each datagram fires immediately after decode.
+        """
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        sock.setblocking(False)
+        sock.bind((AUDIO_UDP_HOST, AUDIO_UDP_PORT))
+        loop = asyncio.get_running_loop()
         _total = 0
+        logger.info("Audio UDP listener on %s:%d", AUDIO_UDP_HOST, AUDIO_UDP_PORT)
         try:
             while True:
-                data = fh.read(AUDIO_CHUNK * 2)  # drain up to 2 chunks at once
-                now  = time.monotonic()
-
+                data = await loop.sock_recv(sock, 4096)
                 if data:
-                    _last_data_t = now
-                    _buf.extend(data)
-
-                    # Emit all complete AUDIO_CHUNK-sized blocks from the buffer
-                    while len(_buf) >= AUDIO_CHUNK:
-                        raw = bytes(_buf[:AUDIO_CHUNK])
-                        del _buf[:AUDIO_CHUNK]
-
-                        # Mix stereo → mono
-                        if channels == 2 and bits == 16:
-                            stereo = np.frombuffer(raw, dtype=np.int16).reshape(-1, 2)
-                            mixed  = stereo.astype(np.int32).sum(axis=1) // 2
-                            chunk  = mixed.astype(np.int16).tobytes()
-                        else:
-                            chunk = raw
-
-                        # Pace: sleep if we're getting too far ahead of real-time
-                        if _pace_t0 == 0.0:
-                            _pace_t0 = now
-                        _pace_bytes += len(chunk)
-                        audio_s  = _pace_bytes / mono_rate
-                        wall_s   = time.monotonic() - _pace_t0
-                        ahead_s  = audio_s - wall_s
-                        if ahead_s > PACE_AHEAD:
-                            await asyncio.sleep(ahead_s - 0.02)
-
-                        _total += len(chunk)
-                        try:
-                            await self._audio_cb(chunk)
-                        except Exception:
-                            logger.exception("audio_callback raised an exception")
-
-                else:
-                    # No new WAV data
-                    if _last_data_t > 0 and now - _last_data_t > GAP_RESET_S:
-                        # Silence gap — reset pacing only; call end is signalled by VLC header
-                        _buf.clear()
-                        _pace_t0     = 0.0
-                        _pace_bytes  = 0
-                        _last_data_t = 0.0
-                    await asyncio.sleep(AUDIO_POLL_S)
+                    _total += len(data)
+                    try:
+                        await self._audio_cb(data)
+                    except Exception:
+                        logger.exception("audio_callback raised an exception")
         except asyncio.CancelledError:
             pass
         except Exception:
-            logger.exception("Unexpected error in audio WAV reader")
+            logger.exception("Unexpected error in audio UDP reader")
         finally:
-            logger.info("Audio WAV reader done — total=%d bytes", _total)
+            sock.close()
+            logger.info("Audio UDP reader done — total=%d bytes", _total)
