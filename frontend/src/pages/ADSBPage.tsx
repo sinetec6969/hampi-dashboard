@@ -61,8 +61,14 @@ function fmtHdg(deg: number | null): string {
   return deg + '°'
 }
 
+const STALE_S = 10
+
 function staleness(last_seen: number): number {
   return Date.now() / 1000 - last_seen
+}
+
+function isFresh(ac: Aircraft): boolean {
+  return staleness(ac.last_seen) <= STALE_S
 }
 
 // ── Map auto-fit ─────────────────────────────────────────────────────────
@@ -95,7 +101,14 @@ export default function ADSBPage() {
   const [connected, setConnected] = useState(false)
   const [latRef, setLatRef]       = useState(0)
   const [lonRef, setLonRef]       = useState(0)
+  const [, setTick]               = useState(0)
   const wsRef = useRef<WebSocket | null>(null)
+
+  // Per-second tick — drives stale expiry and map refresh without waiting for WS messages
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   // Fetch reference position and initial snapshot
   useEffect(() => {
@@ -149,11 +162,14 @@ export default function ADSBPage() {
     return () => { ws.close() }
   }, [])
 
-  const visible  = Object.values(aircraft).filter(a => a.lat !== null && a.lon !== null)
-  const selAc    = selected ? aircraft[selected] : null
+  const fresh    = Object.values(aircraft).filter(isFresh)
+  const visible  = fresh.filter(a => a.lat !== null && a.lon !== null)
+  const selAc    = selected && isFresh(aircraft[selected] ?? { last_seen: 0 } as Aircraft)
+                   ? aircraft[selected]
+                   : null
   const mapCenter: [number, number] = latRef && lonRef ? [latRef, lonRef] : [39, -98]
   const mapZoom  = latRef && lonRef ? 8 : 4
-  const count    = Object.keys(aircraft).length
+  const count    = fresh.length
 
   return (
     <div className="adsb-page">
@@ -247,34 +263,36 @@ export default function ADSBPage() {
             </div>
           ) : (
             <div className="adsb-list">
-              <div className="adsb-list-header">In range</div>
-              {Object.values(aircraft).length === 0 ? (
+              {fresh.length === 0 ? (
                 <div className="adsb-list-empty">
                   {connected
                     ? 'Waiting for aircraft…'
                     : 'ADS-B offline — switch SDR mode or enable ADSB_ENABLE=1'}
                 </div>
               ) : (
-                Object.values(aircraft)
-                  .sort((a, b) => (b.altitude ?? 0) - (a.altitude ?? 0))
-                  .map(ac => (
-                    <div
-                      key={ac.icao}
-                      className={'adsb-list-row' + (ac.lat === null ? ' adsb-list-row-nopos' : '')}
-                      onClick={() => ac.lat !== null && setSelected(ac.icao)}
-                    >
-                      <span
-                        className="adsb-list-plane"
-                        style={{ color: altColor(ac.altitude) }}
-                      >✈</span>
-                      <span className="adsb-list-call">
-                        {ac.callsign ?? ac.icao.toUpperCase()}
-                      </span>
-                      <span className="adsb-list-alt">
-                        {ac.altitude !== null ? (ac.altitude / 1000).toFixed(1) + 'k' : '—'}
-                      </span>
-                    </div>
-                  ))
+                <>
+                  <div className="adsb-list-cols">
+                    <span/>
+                    <span>ID</span>
+                    <span>HDG</span>
+                    <span>SPD</span>
+                  </div>
+                  {fresh
+                    .sort((a, b) => (b.altitude ?? 0) - (a.altitude ?? 0))
+                    .map(ac => (
+                      <div
+                        key={ac.icao}
+                        className={'adsb-list-row' + (ac.lat === null ? ' adsb-list-row-nopos' : '')}
+                        onClick={() => ac.lat !== null && setSelected(ac.icao)}
+                      >
+                        <span className="adsb-list-plane" style={{ color: altColor(ac.altitude) }}>✈</span>
+                        <span className="adsb-list-id">{ac.callsign ?? ac.icao.toUpperCase()}</span>
+                        <span className="adsb-list-hdg">{ac.heading !== null ? ac.heading + '°' : '—'}</span>
+                        <span className="adsb-list-spd">{ac.speed !== null ? ac.speed + 'kt' : '—'}</span>
+                      </div>
+                    ))
+                  }
+                </>
               )}
             </div>
           )}
