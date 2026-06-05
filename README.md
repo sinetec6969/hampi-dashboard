@@ -4,7 +4,7 @@
 No cloud. No API keys. Everything runs on-device and serves to any browser on your LAN or Tailscale network.
 
 **Stack:** FastAPI (Python) · React/Vite · RTL-SDR · dsd-fme · meshtastic · pyModeS  
-**Version:** 0.1.5_py3ModeS  
+**Version:** 0.2.0_n3wb361nn1n6  
 **Last updated:** 2026-06-05
 
 ---
@@ -346,6 +346,18 @@ Heltec V3 (Meshtastic, LoRa) — no SDR
 
 ## Version History
 
+### 0.2.0_n3wb361nn1n6 — 2026-06-05
+- **DMR audio fix: WAV file polling replaced with UDP** — root cause of choppiness was libc stdio buffering in dsd-fme accumulating ~4 KB (~120 ms of audio) before flushing, compounded by asyncio poll-loop jitter under Pi load.
+  - `dsd-fme` flag changed from `-w /tmp/dsd_audio.wav` to `-o udp:127.0.0.1:23456`. dsd-fme now sends one UDP datagram per AMBE frame (~320 bytes, 20 ms of 8 kHz mono int16) directly to a Python asyncio UDP receiver.
+  - `_read_audio_wav()` (117 lines: WAV header parser, stereo→mono numpy mix, pacing math, 20 ms poll loop) replaced by `_read_audio_udp()` (25 lines: non-blocking socket + `loop.sock_recv`). No file I/O, no polling, no pacing — audio is event-driven at AMBE frame cadence.
+  - Removed: WAV file lifecycle, 50-iteration startup wait, numpy import from `dmr.py`.
+- **ADS-B UI: per-second refresh, 10 s stale rolloff, column layout**
+  - Per-second `setInterval` tick drives re-renders independently of WebSocket message rate — map and list update every second even during silence.
+  - Frontend stale filter (`STALE_S = 10`): aircraft unseen > 10 s disappear from map markers and sidebar list. Backend expiry remains 60 s for CPR continuity.
+  - Selected aircraft auto-clears when it goes stale; header count reflects fresh aircraft only.
+  - Sidebar list replaced with CSS grid: icon | ID | HDG | SPD columns with column header row. Side panel widened 240 → 272 px.
+- **ADS-B fix: pyModeS v3 API migration** — see 0.1.5 below (shipped same day, folded into 0.2.0 milestone).
+
 ### 0.1.5_py3ModeS — 2026-06-05
 - **ADS-B fix: pyModeS v3 API migration** — `adsb.py` rewrote from scratch for pyModeS 3.3.0 which dropped the entire v2 function API (`pms.df()`, `pms.icao()`, `pms.adsb.*`). The v2 calls were silently crashing inside the decode loop (swallowed by broad `except`), so the decoder accepted messages but produced nothing.
   - Now uses `pms.Message(hex)` → `.df`, `.icao`, `.typecode`, `.decode()` for per-message parsing.
@@ -396,14 +408,24 @@ See full changelog in [git history](https://github.com/sinetec6969/hampi-dashboa
 ## Version 1.0 Roadmap
 
 ### Signal & Decoding
-- [x] ADS-B live aircraft map (`rtl_adsb` + `pyModeS`) ← done in 0.1.4_THEPLANES
+- [x] ADS-B live aircraft map (`rtl_adsb` + `pyModeS`) ← 0.1.4_THEPLANES
+- [x] ADS-B pyModeS v3 API migration ← 0.1.5_py3ModeS
+- [x] Meshtastic node monitor (USB serial, no SDR) ← 0.1.1_m3shd4ddY
 - [ ] APRS decode (`direwolf`, dedicated dongle or mode-switch)
-- [x] Meshtastic node monitor (USB serial, no SDR) ← done in 0.1.1_m3shd4ddY
 - [ ] Trunked DMR system support (control channel parsing)
 - [ ] P25 Phase 1 & 2, NXDN, D-STAR
 
+### ADS-B
+- [x] Live aircraft map with altitude colouring, track history, click-to-detail ← 0.1.4_THEPLANES
+- [x] Per-second map refresh and 10 s frontend stale rolloff ← 0.2.0_n3wb361nn1n6
+- [x] ID / HDG / SPD column layout in sidebar ← 0.2.0_n3wb361nn1n6
+- [ ] Flight number / airline lookup (e.g. via local `aircraft.csv` DB)
+- [ ] Ground track replay / breadcrumb trail on map
+- [ ] Range ring overlay (distance from receiver)
+- [ ] Alert on specific ICAO hex or squawk code
+
 ### Audio
-- [ ] Fix DMR audio choppiness (highest priority)
+- [x] Fix DMR audio choppiness — WAV polling → UDP per-frame delivery ← 0.2.0_n3wb361nn1n6
 - [ ] Audio recording — save decoded voice to timestamped WAV per call
 - [ ] Per-talkgroup squelch and mute
 - [ ] Volume control slider
@@ -412,6 +434,7 @@ See full changelog in [git history](https://github.com/sinetec6969/hampi-dashboa
 - [ ] `config.yaml` — frequencies, channel lists, talkgroup aliases, squelch levels
 - [ ] Systemd service file for auto-start on boot
 - [ ] udev rules generator in setup script
+- [ ] udev rules for stable dongle indices (critical for multi-dongle setups)
 
 ### DMR Intelligence
 - [ ] Talkgroup alias CSV import (map TG numbers to friendly names)
