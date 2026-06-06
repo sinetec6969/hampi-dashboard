@@ -25,7 +25,7 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
   async function startWorklet(ctx: AudioContext) {
     await ctx.audioWorklet.addModule('/audio-processor.js')
 
-    const targetSamples = Math.round(ctx.sampleRate * 0.50)
+    const targetSamples = Math.round(ctx.sampleRate * 0.10)
     const worklet = new AudioWorkletNode(ctx, 'pcm-processor', {
       processorOptions: { targetSamples },
     })
@@ -60,7 +60,12 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
   // Scheduled-buffer fallback (HTTP non-localhost)
   // -----------------------------------------------------------------------
   function startScheduled(ctx: AudioContext) {
-    nextTimeRef.current = ctx.currentTime + 0.5
+    nextTimeRef.current = ctx.currentTime + 0.1
+
+    // Resample manually to ctx.sampleRate — don't rely on browser resampling
+    // of AudioBuffer, which is inconsistent across Chromium/mobile builds and
+    // causes the buffer to play at the wrong duty cycle (sounds like slomo).
+    const ratio = ctx.sampleRate / inputRate
 
     const ws = new WebSocket(`ws://${location.host}${wsPath}`)
     ws.binaryType = 'arraybuffer'
@@ -73,18 +78,23 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
     ws.onmessage = e => {
       if (!(e.data instanceof ArrayBuffer)) return  // skip JSON status frames
       const i16 = new Int16Array(e.data)
-      const f32 = new Float32Array(i16.length)
-      for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768
+      const out = new Float32Array(Math.round(i16.length * ratio))
+      for (let i = 0; i < out.length; i++) {
+        const src = i / ratio
+        const lo  = src | 0
+        const hi  = lo + 1 < i16.length ? lo + 1 : lo
+        out[i]    = (i16[lo] + (src - lo) * (i16[hi] - i16[lo])) / 32768
+      }
 
-      const buf = ctx.createBuffer(1, f32.length, inputRate)
-      buf.getChannelData(0).set(f32)
+      const buf = ctx.createBuffer(1, out.length, ctx.sampleRate)
+      buf.getChannelData(0).set(out)
 
       const src = ctx.createBufferSource()
       src.buffer = buf
       src.connect(ctx.destination)
 
       const now = ctx.currentTime
-      if (nextTimeRef.current < now) nextTimeRef.current = now + 0.5
+      if (nextTimeRef.current < now) nextTimeRef.current = now + 0.1
       src.start(nextTimeRef.current)
       nextTimeRef.current += buf.duration
     }
