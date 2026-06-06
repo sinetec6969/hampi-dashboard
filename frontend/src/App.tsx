@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
 import './App.css'
 import Home from './pages/Home'
@@ -6,6 +7,17 @@ import ADSBPage from './pages/ADSBPage'
 import APRSPage from './pages/APRSPage'
 import MeshtasticPage from './pages/MeshtasticPage'
 import AirbandPage from './pages/AirbandPage'
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)')
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return isMobile
+}
 
 const NAV_LINKS = [
   { to: '/dmr',         label: 'DMR' },
@@ -16,8 +28,9 @@ const NAV_LINKS = [
 ]
 
 export default function App() {
+  const isMobile = useIsMobile()
   return (
-    <div className="app-shell">
+    <div className={`app-shell${isMobile ? ' mobile' : ''}`}>
       <nav className="app-nav">
         <NavLink to="/" end className="app-nav-brand">🛰 HamPi</NavLink>
         <div className="app-nav-links">

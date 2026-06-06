@@ -259,3 +259,61 @@ input[type=number], input[type=range] { background: #1a1a1a; color: #e0e0e0; bor
 /* Leaflet popup override for dark theme */
 .adsb-popup { font-family: 'Courier New', monospace; font-size: 0.8rem; }
 .adsb-popup-call { font-weight: bold; color: #4488ff; margin-bottom: 2px; }
+
+/* ── Mobile responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Base — unlock the fixed-height, no-scroll shell */
+  body { overflow: auto; height: auto; }
+  #root { height: auto; min-height: 100vh; }
+
+  .app-shell { height: auto; min-height: 100vh; }
+  .app-content { overflow: visible; flex: none; min-height: 0; }
+
+  /* Nav — let links scroll horizontally rather than overflow/clip */
+  .app-nav { height: auto; min-height: 40px; flex-wrap: wrap; padding: 6px 10px; gap: 4px; }
+  .app-nav-brand { margin-right: auto; }
+  .app-nav-links { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .app-nav-links::-webkit-scrollbar { display: none; }
+  .app-nav-link { padding: 4px 8px; font-size: 0.72rem; white-space: nowrap; }
+
+  /* Home */
+  .home-page { padding: 20px 12px 32px; }
+  .home-hero-title { font-size: 1.4rem; letter-spacing: 1px; }
+  .home-sysinfo { padding: 8px 12px; }
+  .mode-grid { grid-template-columns: 1fr; }
+
+  /* DMR — stack left/right cols, shrink waterfall, allow page to scroll */
+  .header { flex-wrap: wrap; gap: 6px; }
+  .header-freq { font-size: 1.1rem; letter-spacing: 1px; }
+  .main { flex-direction: column; overflow: visible; flex: none; }
+  .left-col { overflow: visible; min-height: 0; }
+  .right-col { width: 100%; border-left: none; border-top: 1px solid #2a2a2a; }
+  .waterfall-wrap { flex: none; height: 120px; }
+  .bottom-row { flex-direction: column; height: auto; }
+  .map-wrap { height: 240px; flex: none; }
+
+  /* Airband — stack freq list above controls */
+  .airband-page { height: auto; }
+  .airband-body { flex-direction: column; overflow: visible; min-height: 0; }
+  .airband-freqlist { width: 100%; max-height: 200px; border-right: none; border-bottom: 1px solid #222; }
+  .airband-controls { overflow: visible; }
+
+  /* Meshtastic — stack node list + map + messages */
+  .mesh-page { height: auto; }
+  .mesh-body { flex-direction: column; overflow: visible; min-height: 0; }
+  .mesh-nodelist { width: 100%; height: auto; max-height: 180px; border-right: none; border-bottom: 1px solid #222; }
+  .mesh-map { height: 280px; flex: none; }
+  .mesh-msgpanel { height: auto; max-height: 320px; }
+  /* Prevent iOS auto-zoom on input focus */
+  .mesh-compose-input { font-size: 16px; }
+
+  /* ADS-B — map top half, sidebar/list below */
+  .adsb-page { height: auto; }
+  .adsb-body { flex-direction: column; overflow: visible; min-height: 0; }
+  .adsb-map-wrap { height: 50vh; flex: none; }
+  .adsb-side { width: 100%; border-left: none; border-top: 1px solid #222; max-height: 280px; }
+
+  /* Touch targets */
+  .btn { padding: 6px 14px; }
+  button { touch-action: manipulation; }
+}
