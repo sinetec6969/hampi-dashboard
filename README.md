@@ -274,6 +274,41 @@ Check `groups $USER` includes `dialout`. Check `ls /dev/ttyUSB*` exists. Kill Mo
 - [ ] **Audio recording** — timestamped WAV per DMR call
 
 ### Further out
+
+#### Satellite Telemetry (433 MHz / TinyGS)
+
+Receive and decode satellite LoRa telemetry with the RTL-SDR and upload frames to the [TinyGS](https://tinygs.com) ground station network.
+
+**Architecture:**
+```
+RTL-SDR (mode-switch or dedicated dongle)
+  └─ rtl_sdr subprocess → raw IQ at 250 kHz, tuned to sat freq
+       └─ rtl-lora (C) OR Python numpy chirp demodulator
+            └─ decoded packet bytes + RSSI/SNR
+                 └─ satellite.py (SatelliteDecoder)
+                      ├─ MQTT → mqtt.tinygs.com  (paho-mqtt)
+                      ├─ /ws/satellite  WebSocket
+                      └─ /api/satellite/* REST
+```
+
+**Phases:**
+1. **Research** — clone `tinygs/tinyGS` for satellite DB (freq/SF/BW/CR per sat); confirm MQTT payload format; pick target sats visible from this location
+2. **LoRa decoder** — try `rtl-lora` (lightweight C, no GNU Radio) first; fall back to Python/numpy chirp dechirp → FFT → grey decode → Hamming FEC if needed; target SF7–SF12, BW 125/250/500 kHz
+3. **TinyGS MQTT upload** — `paho-mqtt`; payload `{ "packet": "<base64>", "rssi", "snr", "frequency", "satelliteName" }`; register Pi as TinyGS station
+4. **Dashboard page** — `SatellitePage.tsx`: live packet log, hex/ASCII frame dump, RSSI/SNR, satellite name + pass time, upload status badge
+5. **Pass prediction** *(stretch)* — `skyfield` + Celestrak TLE fetch; auto-tune RTL-SDR on approach; show next pass time and elevation arc
+
+**Dependencies:** `paho-mqtt` (pip), `skyfield` (pip, stretch), `rtl-lora` (build from source)
+
+**Open questions before starting:**
+- One RTL-SDR dongle (mode-switch) or dedicated second dongle for satellite?
+- Use `rtl-lora` C tool or build Python numpy demodulator from scratch?
+- TinyGS account for MQTT credentials, or local-only display first?
+
+**Fallback:** Heltec WiFi LoRa 32 V3 is a TinyGS-compatible device — if pure-SDR LoRa decode proves unreliable, a second Heltec (~$12) gives a rock-solid hardware receiver; Pi handles MQTT upload and dashboard only.
+
+---
+
 - [ ] Trunked DMR (control channel parsing)
 - [ ] P25 Phase 1 & 2, NXDN, D-STAR
 - [ ] ADS-B range rings, squawk alerts, ICAO watchlist
