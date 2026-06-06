@@ -2,11 +2,11 @@
 dmr.py - Async DMR decoder wrapping dsd-fme.
 
 dsd-fme command:
-    dsd-fme -i - -fs -o udp:127.0.0.1:23456
+    dsd-fme -i - -fs -o null
 
-  -i -   read raw 48kHz int16 PCM from stdin
-  -fs    force DMR BS/MS Simplex (Tier II repeater)
-  -o udp send decoded AMBE audio as raw 8kHz mono int16 UDP datagrams
+  -i -    read raw 48kHz int16 PCM from stdin
+  -fs     force DMR BS/MS Simplex (Tier II repeater)
+  -o null discard decoded audio (audio output removed)
 
 dsd-fme outputs ALL metadata to stderr (not stdout).
 stdout is ignored.  stderr contains lines like:
@@ -19,24 +19,17 @@ stdout is ignored.  stderr contains lines like:
 
 Timeslots: dsd-fme uses 1-indexed slot numbers (slot1=TS1, slot2=TS2).
 We store 0-indexed internally (subtract 1) to match frontend timeslot+1 display.
-
-Audio delivery: each AMBE frame fires a UDP datagram (~320 bytes, 20 ms of 8kHz
-mono int16) from dsd-fme to the Python listener.  No stdio buffering, no polling.
 """
 
 import asyncio
 import logging
 import re
-import socket as _socket
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Callable, Awaitable, Optional
 
 logger = logging.getLogger(__name__)
-
-AUDIO_UDP_HOST = "127.0.0.1"
-AUDIO_UDP_PORT = 23456
 
 # --- Regex patterns for dsd-fme stderr output ----------------------------
 
@@ -82,7 +75,6 @@ def _map_ftype(raw: str) -> str:
 
 # -------------------------------------------------------------------------
 
-AudioCallback    = Callable[[bytes], Awaitable[None]]
 MetaCallback     = Callable[[dict], Awaitable[None]]
 CallEndCallback  = Callable[[dict], Awaitable[None]]
 
@@ -107,12 +99,10 @@ class DMRFrame:
 class DMRDecoder:
     """Async wrapper around dsd-fme."""
 
-    DSD_ARGS = ["dsd-fme", "-i", "-", "-fs", "-o",
-                f"udp:{AUDIO_UDP_HOST}:{AUDIO_UDP_PORT}"]
+    DSD_ARGS = ["dsd-fme", "-i", "-", "-fs", "-o", "null"]
 
-    def __init__(self, audio_callback: AudioCallback, meta_callback: MetaCallback,
+    def __init__(self, meta_callback: MetaCallback,
                  call_end_callback: Optional[CallEndCallback] = None):
-        self._audio_cb    = audio_callback
         self._meta_cb     = meta_callback
         self._call_end_cb = call_end_callback
         self._proc:       Optional[asyncio.subprocess.Process] = None
@@ -149,8 +139,7 @@ class DMRDecoder:
         logger.info("dsd-fme started (pid=%d)", self._proc.pid)
 
         self._tasks = [
-            asyncio.create_task(self._read_stderr(),   name="dfme-stderr"),
-            asyncio.create_task(self._read_audio_udp(), name="dfme-audio"),
+            asyncio.create_task(self._read_stderr(), name="dfme-stderr"),
         ]
 
     async def stop(self) -> None:
@@ -374,31 +363,3 @@ class DMRDecoder:
         except Exception:
             logger.exception("call_end_callback raised an exception")
 
-    async def _read_audio_udp(self) -> None:
-        """Receive decoded 8kHz mono int16 PCM from dsd-fme via UDP.
-
-        dsd-fme sends one datagram per AMBE frame (~320 bytes, 20 ms).
-        No buffering, no polling — each datagram fires immediately after decode.
-        """
-        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-        sock.setblocking(False)
-        sock.bind((AUDIO_UDP_HOST, AUDIO_UDP_PORT))
-        loop = asyncio.get_running_loop()
-        _total = 0
-        logger.info("Audio UDP listener on %s:%d", AUDIO_UDP_HOST, AUDIO_UDP_PORT)
-        try:
-            while True:
-                data = await loop.sock_recv(sock, 4096)
-                if data:
-                    _total += len(data)
-                    try:
-                        await self._audio_cb(data)
-                    except Exception:
-                        logger.exception("audio_callback raised an exception")
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.exception("Unexpected error in audio UDP reader")
-        finally:
-            sock.close()
-            logger.info("Audio UDP reader done — total=%d bytes", _total)

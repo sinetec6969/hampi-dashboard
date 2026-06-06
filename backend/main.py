@@ -4,7 +4,6 @@ main.py - FastAPI application for the HamPi SDR dashboard.
 WebSocket endpoints:
   /ws/waterfall  — binary float32 FFT frames
   /ws/dmr        — JSON DMR metadata
-  /ws/audio      — binary PCM audio from DSD
 
 REST endpoints:
   GET  /api/status
@@ -95,7 +94,6 @@ sdr_task: Optional[asyncio.Task]          = None
 
 waterfall_clients:  Set[WebSocket] = set()
 dmr_clients:        Set[WebSocket] = set()
-audio_clients:      Set[WebSocket] = set()
 airband_clients:    Set[WebSocket] = set()
 meshtastic_clients: Set[WebSocket] = set()
 adsb_clients:       Set[WebSocket] = set()
@@ -199,10 +197,6 @@ async def on_adsb_aircraft(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 # DMR callbacks (called from DMRDecoder background tasks)
 # ---------------------------------------------------------------------------
-
-async def on_audio(pcm: bytes) -> None:
-    await broadcast_bytes(audio_clients, pcm)
-
 
 async def on_meta(frame_dict: dict) -> None:
     await broadcast_json(dmr_clients, frame_dict)
@@ -308,7 +302,6 @@ async def lifespan(app: FastAPI):
 
     # Initialise DMR decoder
     decoder = DMRDecoder(
-        audio_callback=on_audio,
         meta_callback=on_meta,
         call_end_callback=on_call_end,
     )
@@ -449,23 +442,6 @@ async def ws_dmr(websocket: WebSocket):
         logger.info("DMR metadata client disconnected — total=%d", len(dmr_clients))
 
 
-@app.websocket("/ws/audio")
-async def ws_audio(websocket: WebSocket):
-    await websocket.accept()
-    audio_clients.add(websocket)
-    logger.info("Audio client connected — total=%d", len(audio_clients))
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        logger.exception("Unexpected error in audio WebSocket handler")
-    finally:
-        audio_clients.discard(websocket)
-        logger.info("Audio client disconnected — total=%d", len(audio_clients))
-
-
 @app.websocket("/ws/airband")
 async def ws_airband(websocket: WebSocket):
     await websocket.accept()
@@ -529,7 +505,6 @@ async def api_status():
         "clients": {
             "waterfall": len(waterfall_clients),
             "dmr":       len(dmr_clients),
-            "audio":     len(audio_clients),
         },
     }
 
