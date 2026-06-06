@@ -1,4 +1,4 @@
-# HamPi SDR Dashboard
+# HamPi SDR Dashboard `v0.2.1_piperrrrr`
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square&logo=python&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=black)
