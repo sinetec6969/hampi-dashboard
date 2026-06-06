@@ -7,7 +7,7 @@
 ![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-asyncio-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![RTL-SDR](https://img.shields.io/badge/RTL--SDR-Blog_V4-ff6600?style=flat-square)
-![Version](https://img.shields.io/badge/version-0.2.0__n3wb361nn1n6-brightgreen?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.1__piperrrrr-brightgreen?style=flat-square)
 
 ---
 
@@ -17,13 +17,13 @@ One Raspberry Pi. One RTL-SDR dongle (or three). A browser on any device on your
 
 | Mode | What you get |
 |---|---|
-| 📡 **DMR** | Live voice decode · talkgroup/ID/alias · caller map with geocoding · call history log |
+| 📡 **DMR** | Live voice decode · talkgroup/ID/alias · caller map with geocoding · call history log · no audio output |
 | ✈️ **ADS-B** | Live aircraft map at 1090 MHz · altitude · speed · heading · track history |
 | 🛩️ **Airband AM** | 118–137 MHz channel scanner · squelch · real-time audio |
 | 🌐 **Meshtastic** | LoRa mesh node map · live messages · send/DM from the dashboard |
 | 📊 **Waterfall** | 2.4 MHz live FFT spectrum · click to tune · memory channels |
 
-One dongle handles all four SDR modes via the home-page toggle. Add more dongles to run them simultaneously.
+One dongle handles all four SDR modes via the home-page toggle. Add more dongles to run them simultaneously. Dashboard is **mobile-responsive** — layout adapts automatically to phone or tablet.
 
 ---
 
@@ -44,6 +44,22 @@ Everything below is **verified running** on a Raspberry Pi 4 with one RTL-SDR Bl
 
 ## Features
 
+### 📱 Mobile-Responsive Layout
+
+The dashboard detects desktop vs. mobile via a `useIsMobile()` hook (`window.matchMedia ≤768px`) and applies a full responsive CSS override:
+
+- **Nav** — links scroll horizontally on narrow screens
+- **ADS-B** — map fills top half of screen; aircraft list below
+- **Meshtastic** — node list, map, and message panel stack vertically
+- **Airband** — frequency list above controls
+- **DMR** — columns stack; waterfall shrinks to 120 px
+- **Home** — single-column card grid
+- iOS input-zoom fix (`font-size: 16px` on compose input)
+
+Desktop layout is completely unchanged — the media query only fires below 768 px.
+
+---
+
 ### ✈️ ADS-B — Live Aircraft Map
 
 Switch to ADS-B mode and watch aircraft populate a dark Leaflet map in real time.
@@ -58,9 +74,7 @@ Switch to ADS-B mode and watch aircraft populate a dark Leaflet map in real time
 
 ### 📡 DMR — Voice Decode & Caller Intelligence
 
-- `dsd-fme` decodes DMR/MOTOTRBO Tier II from FM-demodulated IQ
-- Audio streamed via UDP datagram pipeline — one packet per AMBE frame (20 ms), event-driven, no polling lag
-- AudioWorklet playback in the browser — gapless, real-time, works over LAN and Tailscale
+- `dsd-fme` decodes DMR/MOTOTRBO Tier II from FM-demodulated IQ (`-o null` — metadata only, no audio output)
 - Per-frame metadata: timeslot, frame type, color code, talkgroup, source ID, talker alias
 - **RadioID.net lookup** — callsign, name, city/state for every heard DMR ID (1-hour cache)
 - **Caller map** — Nominatim geocoding pins every heard station on a world map; click for full ID card + QRZ link
@@ -216,10 +230,8 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 Device 0 — mode-switchable (home page toggle)
   ├─ [DMR]
   │    └── rtl_tcp :1234 → SDREngine
-  │                └── fm_demodulate → 48 kHz PCM → dsd-fme stdin
-  │                        ├── stderr → DMRFrame → /ws/dmr → caller map + call history
-  │                        └── UDP :23456 → 8 kHz mono int16 per AMBE frame
-  │                                └── /ws/audio → AudioWorklet
+  │                └── fm_demodulate → 48 kHz PCM → dsd-fme stdin (-o null)
+  │                        └── stderr → DMRFrame → /ws/dmr → caller map + call history
   │
   ├─ [Airband]
   │    └── rtl_tcp :1234 → SDREngine
@@ -271,7 +283,6 @@ Check `groups $USER` includes `dialout`. Check `ls /dev/ttyUSB*` exists. Kill Mo
 - [ ] **config.yaml** — replace env vars; editable channel/talkgroup lists
 - [ ] **Systemd service** — auto-start and restart on boot
 - [ ] **ADS-B flight lookup** — local `aircraft.csv` for airline/registration data
-- [ ] **Audio recording** — timestamped WAV per DMR call
 
 ### Further out
 
@@ -318,6 +329,11 @@ RTL-SDR (mode-switch or dedicated dongle)
 ---
 
 ## Version History
+
+### 0.2.1_piperrrrr — 2026-06-05
+- **Mobile-responsive layout** — `useIsMobile()` hook + CSS media query block (≤768 px). All pages adapt: ADS-B map stacks above list, Meshtastic node list/map/messages go vertical, Airband freq list above controls, DMR columns stack. Nav links scroll horizontally. iOS input-zoom fix.
+- **DMR audio removed** — AMBE decode via `dsd-fme` UDP was consistently unreliable (sample-rate mismatch, slomo playback). Removed cleanly: `-o null` flag, `/ws/audio` WebSocket, `audio_clients`, `AudioCallback`, UDP socket listener. DMR page now metadata-only (map, call history, talkgroup decode).
+- **Satellite telemetry roadmap** — full architecture plan for RTL-SDR + LoRa decode + TinyGS MQTT upload added to roadmap.
 
 ### 0.2.0_n3wb361nn1n6 — 2026-06-05
 - **DMR audio fix** — replaced WAV file polling with dsd-fme UDP output (`-o udp:127.0.0.1:23456`). Root cause: libc stdio buffered ~4 KB before flush, causing audio to arrive in ~120 ms irregular bursts. Now event-driven at AMBE frame cadence (20 ms/packet). Verified live: 331 WebSocket frames in 8 seconds during an active call.
