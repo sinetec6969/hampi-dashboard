@@ -1,8 +1,5 @@
 # HamPi SDR Dashboard
 
-> **Self-hosted RF monitoring command center for Raspberry Pi.**  
-> Decode DMR voice. Track aircraft live. Monitor a 200-node mesh network. Scan airband. All from a browser. Zero cloud, zero subscriptions, zero data leaving your network.
-
 ![Python](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square&logo=python&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-asyncio-009688?style=flat-square&logo=fastapi&logoColor=white)
@@ -11,19 +8,36 @@
 
 ---
 
+## The Vision
+
+> **A $50 Raspberry Pi that sees everything in the air around you — and shows it in a browser.**
+
+One Pi. A couple of RTL-SDR dongles. A dark browser tab on your phone or laptop.  
+Every signal decoded. Every aircraft tracked. Every mesh node mapped. Every packet logged.  
+**No cloud. No subscription. No data leaving your network. Ever.**
+
+This is a full RF situational awareness stack built from commodity hardware and open-source tools. The goal is a single self-hosted device that gives you total visibility into the radio environment around you — digital voice, aviation transponders, airband comms, LoRa mesh, satellite telemetry, APRS packet radio — all decoded on-device, all accessible from a browser on your LAN or over Tailscale.
+
+**Where we're at right now:**
+
+| Layer | Status | What's working |
+|---|---|---|
+| 📡 DMR digital voice | ✅ Live | Decode · talkgroup/ID · caller map · RadioID lookup · call history |
+| ✈️ ADS-B 1090 MHz | ✅ Live | Live aircraft map · CPR position · altitude/speed/heading · track history |
+| 🛩️ Airband AM | ✅ Live | 118–137 MHz scanner · squelch · real-time audio |
+| 🌐 Meshtastic LoRa | ✅ Live | 200-node mesh · node map · live messages · send/DM |
+| 📊 Waterfall | ✅ Live | 2.4 MHz FFT · click-to-tune · memory channels |
+| 📱 Mobile UI | ✅ Live | Responsive layout · auto-detects phone vs desktop |
+| 📻 APRS | 🔨 Next | `direwolf` TNC · station map · packet log |
+| 🛰️ Satellite telemetry | 🗺️ Planned | RTL-SDR LoRa decode · TinyGS upload · pass prediction |
+| 🔒 config.yaml | 🗺️ Planned | Replace env vars · editable channel/talkgroup lists |
+| 🚀 Systemd service | 🗺️ Planned | Auto-start on boot |
+
+One dongle runs all SDR modes via a mode-switcher. Add more dongles to run them simultaneously.
+
+---
+
 ## What It Does
-
-One Raspberry Pi. One RTL-SDR dongle (or three). A browser on any device on your LAN or Tailscale network.
-
-| Mode | What you get |
-|---|---|
-| 📡 **DMR** | Live voice decode · talkgroup/ID/alias · caller map with geocoding · call history log · no audio output |
-| ✈️ **ADS-B** | Live aircraft map at 1090 MHz · altitude · speed · heading · track history |
-| 🛩️ **Airband AM** | 118–137 MHz channel scanner · squelch · real-time audio |
-| 🌐 **Meshtastic** | LoRa mesh node map · live messages · send/DM from the dashboard |
-| 📊 **Waterfall** | 2.4 MHz live FFT spectrum · click to tune · memory channels |
-
-One dongle handles all four SDR modes via the home-page toggle. Add more dongles to run them simultaneously. Dashboard is **mobile-responsive** — layout adapts automatically to phone or tablet.
 
 ---
 
