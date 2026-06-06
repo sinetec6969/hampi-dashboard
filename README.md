@@ -334,6 +334,37 @@ RTL-SDR (mode-switch or dedicated dongle)
 
 ---
 
+#### AX.25 Packet Terminal
+
+Raw AX.25 frame monitoring and a connected-mode terminal via `direwolf` KISS TNC — packet BBS access, digipeater trace, and heard-station log, all in-browser.
+
+**Architecture:**
+```
+RTL-SDR (or VHF radio + audio in)
+  └─ direwolf (TNC) — KISS over TCP port 8001
+       └─ ax25.py (AX25Decoder)
+            ├─ UI frames → heard-stations table + raw frame log
+            ├─ Connected sessions (SABM/UA/I-frames) → terminal relay
+            ├─ /ws/ax25        WebSocket (live frame stream)
+            └─ /api/ax25/*     REST (heard list, frame history)
+```
+
+**Phases:**
+1. **KISS framing** — `direwolf` launched with `KISSPORT 8001`; Python asyncio KISS TCP client; strip framing, emit raw AX.25 bytes
+2. **Frame decode** — parse address field (source, dest, up to 8 digipeaters), control byte (UI / SABM / UA / I / S), PID, info field; log to rolling deque
+3. **Dashboard page** — `AX25Page.tsx`: live frame log (timestamp · source · dest · via path · info), heard-stations table sorted by last-seen, hex/ASCII frame dump panel
+4. **Connected terminal** *(stretch)* — relay SABM/I-frame exchange over a second WebSocket; in-browser terminal for packet BBS or node connects (W2XSC BBS, etc.)
+5. **Beacon inject** *(stretch)* — `ax25.write()` via KISS; transmit beacon or position frame through a connected radio (requires TX-capable rig)
+
+**Dependencies:** `direwolf` (already needed for APRS), no additional pip packages — pure asyncio KISS client
+
+**Open questions before starting:**
+- Share `direwolf` instance with APRS (multiple KISS clients on same port) or run a second instance on a different port?
+- RX-only packet monitor first, or target connected-mode terminal from the start?
+- VHF audio in from radio discriminator, or stick with RTL-SDR direct?
+
+---
+
 - [ ] Trunked DMR (control channel parsing)
 - [ ] P25 Phase 1 & 2, NXDN, D-STAR
 - [ ] ADS-B range rings, squawk alerts, ICAO watchlist
@@ -348,6 +379,7 @@ RTL-SDR (mode-switch or dedicated dongle)
 - **Mobile-responsive layout** — `useIsMobile()` hook + CSS media query block (≤768 px). All pages adapt: ADS-B map stacks above list, Meshtastic node list/map/messages go vertical, Airband freq list above controls, DMR columns stack. Nav links scroll horizontally. iOS input-zoom fix.
 - **DMR audio removed** — AMBE decode via `dsd-fme` UDP was consistently unreliable (sample-rate mismatch, slomo playback). Removed cleanly: `-o null` flag, `/ws/audio` WebSocket, `audio_clients`, `AudioCallback`, UDP socket listener. DMR page now metadata-only (map, call history, talkgroup decode).
 - **Satellite telemetry roadmap** — full architecture plan for RTL-SDR + LoRa decode + TinyGS MQTT upload added to roadmap.
+- **AX.25 packet terminal roadmap** — architecture plan for KISS TNC client, raw frame log, heard-stations table, and connected-mode terminal added to roadmap.
 
 ### 0.2.0_n3wb361nn1n6 — 2026-06-05
 - **DMR audio fix** — replaced WAV file polling with dsd-fme UDP output (`-o udp:127.0.0.1:23456`). Root cause: libc stdio buffered ~4 KB before flush, causing audio to arrive in ~120 ms irregular bursts. Now event-driven at AMBE frame cadence (20 ms/packet). Verified live: 331 WebSocket frames in 8 seconds during an active call.
