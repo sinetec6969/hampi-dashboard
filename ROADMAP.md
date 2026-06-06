@@ -236,6 +236,39 @@ RTL-SDR (mode-switch or dedicated dongle)
 
 ---
 
+### SSTV Image Reception
+
+Decode Slow Scan Television images off the air with the RTL-SDR — ISS SSTV events (145.800 MHz FM), 2 m SSTV activity, and HF SSTV (14.230 MHz, requires direct-sampling mode on the V4).
+
+**Architecture:**
+```
+RTL-SDR (mode-switch or dedicated dongle)
+  └─ rtl_tcp → SDREngine → fm_demodulate() → 11.025 kHz mono audio
+       └─ sstv.py (SSTVDecoder)
+            ├─ VIS header detect → mode select (Scottie S1/S2, Martin M1/M2, Robot 36/72)
+            ├─ sync-pulse line slicing + freq→luma/chroma mapping (1500–2300 Hz)
+            ├─ slant correction (sample-rate drift estimate)
+            ├─ progressive PNG written to disk per frame
+            ├─ /ws/sstv      WebSocket (line-by-line progress + completed image)
+            └─ /api/sstv/*   REST (gallery list, image fetch)
+```
+
+**Phases:**
+1. **Audio tap** — reuse `SDREngine` FM demod at 145.800 MHz; resample to 11.025 kHz mono for the decoder
+2. **VIS + mode detect** — decode the 1900/1200 Hz VIS leader → identify mode and image dimensions
+3. **Line decode** — sync-pulse alignment, frequency→pixel mapping per scanline, slant correction; build the image incrementally
+4. **Dashboard page** — `SSTVPage.tsx`: live decode canvas (fills top-to-bottom as lines arrive), saved-image gallery, mode + timestamp badge, signal-strength meter
+5. **ISS pass automation** *(stretch)* — `skyfield` TLE pass prediction (shared with satellite telemetry) → auto-tune 145.800 MHz and start decode on approach
+
+**Dependencies:** `numpy` (already present); `Pillow` (pip) for PNG output. No GNU Radio.
+
+**Open questions:**
+- Pure-numpy decoder from scratch, or wrap `slowrx`/`qsstv` headless?
+- Auto-detect all modes, or start with Scottie S1 + Robot 36 (most common for ISS) only?
+- HF SSTV needs direct-sampling (Q-branch) on the V4 — separate dongle config, or skip HF and stay VHF-only initially?
+
+---
+
 ### Miscellaneous Backlog
 
 - [ ] config.yaml — replace env vars; editable channel/talkgroup lists
@@ -258,8 +291,9 @@ RTL-SDR (mode-switch or dedicated dongle)
 4. **AX.25 packet terminal** — shares `direwolf` with APRS; low marginal effort after APRS lands
 5. **ADS-B flight lookup** — local `aircraft.csv`; no new hardware required
 6. **Talkgroup aliases + RadioID local DB** — DMR polish
-7. **Satellite telemetry** — research phase first; hardware path TBD
-8. **Full beta tag**
+7. **SSTV image reception** — reuses FM demod; numpy + Pillow, no new hardware for VHF
+8. **Satellite telemetry** — research phase first; hardware path TBD
+9. **Full beta tag**
 
 ---
 
