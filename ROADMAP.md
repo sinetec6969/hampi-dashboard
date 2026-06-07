@@ -236,36 +236,38 @@ RTL-SDR (mode-switch or dedicated dongle)
 
 ---
 
-### SSTV Image Reception
+### ✅ SSTV Image Reception
 
 Decode Slow Scan Television images off the air with the RTL-SDR — ISS SSTV events (145.800 MHz FM), 2 m SSTV activity, and HF SSTV (14.230 MHz, requires direct-sampling mode on the V4).
 
+**Implemented (2026-06-06):**
+- `sstv.py` — `SSTVDecoder`: VIS header detect (1900 Hz leader → 1200 Hz break → 7-bit code + parity); per-line sync hunt; Scottie S1/S2 (GBR), Martin M1/M2 (RGB), Robot 36 (YCbCr→RGB); Hilbert instantaneous-frequency channel decode at 48 kHz; PNG save via Pillow; progressive line callbacks
+- `main.py` — `"sstv"` added to SDR mode switcher (device 0 retuned to 145.800 MHz FM); `sstv_loop()` feeds FM-demodulated audio to decoder; `/ws/sstv` WebSocket; `GET /api/sstv/status`, `GET /api/sstv/images`, `GET /api/sstv/images/{filename}`
+- `SSTVPage.tsx` — live canvas fills row-by-row as lines arrive; decode progress bar; image gallery with lightbox; signal RMS meter; mode badge
+
+**Configuration (env vars):**
+```
+SSTV_FREQ=145800000    # receive frequency Hz (default: 145.800 MHz ISS/2m)
+SSTV_GAIN=40.0         # tuner gain dB
+SSTV_IMAGE_DIR=        # path for saved PNGs (default: sstv_images/ in repo root)
+```
+
 **Architecture:**
 ```
-RTL-SDR (mode-switch or dedicated dongle)
-  └─ rtl_tcp → SDREngine → fm_demodulate() → 11.025 kHz mono audio
+RTL-SDR device 0 (mode-switch)
+  └─ rtl_tcp :1234 → SDREngine → fm_demodulate() @ 48 kHz
        └─ sstv.py (SSTVDecoder)
-            ├─ VIS header detect → mode select (Scottie S1/S2, Martin M1/M2, Robot 36/72)
-            ├─ sync-pulse line slicing + freq→luma/chroma mapping (1500–2300 Hz)
-            ├─ slant correction (sample-rate drift estimate)
-            ├─ progressive PNG written to disk per frame
-            ├─ /ws/sstv      WebSocket (line-by-line progress + completed image)
-            └─ /api/sstv/*   REST (gallery list, image fetch)
+            ├─ State: IDLE → VIS_DECODE → SYNC_HUNT → LINE_DECODE
+            ├─ Hilbert inst-freq → pixel values per scan line
+            ├─ PNG → sstv_images/sstv_YYYYMMDD_HHMMSS.png  (Pillow)
+            ├─ /ws/sstv      WebSocket ({"type":"line"/"image_complete"/"status"})
+            └─ /api/sstv/*   REST (gallery list, image serve)
 ```
 
-**Phases:**
-1. **Audio tap** — reuse `SDREngine` FM demod at 145.800 MHz; resample to 11.025 kHz mono for the decoder
-2. **VIS + mode detect** — decode the 1900/1200 Hz VIS leader → identify mode and image dimensions
-3. **Line decode** — sync-pulse alignment, frequency→pixel mapping per scanline, slant correction; build the image incrementally
-4. **Dashboard page** — `SSTVPage.tsx`: live decode canvas (fills top-to-bottom as lines arrive), saved-image gallery, mode + timestamp badge, signal-strength meter
-5. **ISS pass automation** *(stretch)* — `skyfield` TLE pass prediction (shared with satellite telemetry) → auto-tune 145.800 MHz and start decode on approach
-
-**Dependencies:** `numpy` (already present); `Pillow` (pip) for PNG output. No GNU Radio.
-
-**Open questions:**
-- Pure-numpy decoder from scratch, or wrap `slowrx`/`qsstv` headless?
-- Auto-detect all modes, or start with Scottie S1 + Robot 36 (most common for ISS) only?
-- HF SSTV needs direct-sampling (Q-branch) on the V4 — separate dongle config, or skip HF and stay VHF-only initially?
+**Known limitations / stretch:**
+- No slant correction (sample-rate drift over 240 lines)
+- HF SSTV (14.230 MHz) needs direct-sampling mode on V4 dongle — not yet wired up
+- ISS pass auto-tune — stretch goal shared with satellite telemetry (`skyfield`)
 
 ---
 
@@ -291,7 +293,7 @@ RTL-SDR (mode-switch or dedicated dongle)
 4. **AX.25 packet terminal** — shares `direwolf` with APRS; low marginal effort after APRS lands
 5. **ADS-B flight lookup** — local `aircraft.csv`; no new hardware required
 6. **Talkgroup aliases + RadioID local DB** — DMR polish
-7. **SSTV image reception** — reuses FM demod; numpy + Pillow, no new hardware for VHF
+7. ~~**SSTV image reception**~~ — ✅ done
 8. **Satellite telemetry** — research phase first; hardware path TBD
 9. **Full beta tag**
 
@@ -312,6 +314,7 @@ Device 0 (mode-switchable):
   DMR     → rtl_tcp :1234 → SDREngine → DMRDecoder (dsd-fme)
   Airband → rtl_tcp :1234 → SDREngine → AirbandScanner
   ADS-B   → rtl_adsb -d 0 → ADSBDecoder (pyModeS 3.3.0)
+  SSTV    → rtl_tcp :1234 → SDREngine → SSTVDecoder (145.800 MHz FM)
 
 Device 1+ (dedicated, independent):
   Airband → rtl_tcp :1235 → AirbandScanner
@@ -363,3 +366,4 @@ talkgroups:
 ✅ DMR audio (UDP) — 0.2.0_n3wb361nn1n6 *(subsequently removed — see note above)*  
 ✅ ADS-B pyModeS 3.3.0 rewrite — 0.2.0_n3wb361nn1n6  
 ✅ Mobile-responsive layout — 0.2.1_piperrrrr  
+✅ SSTV image decoder (Scottie S1/S2, Martin M1/M2, Robot 36) — 2026-06-06  
