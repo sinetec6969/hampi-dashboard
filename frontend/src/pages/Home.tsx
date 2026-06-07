@@ -75,6 +75,16 @@ const MODES: ModeCard[] = [
     status: 'live',
     color: '#ff8800',
   },
+  {
+    path: '/satellite',
+    icon: '🛰️',
+    title: 'Satellite Telemetry',
+    subtitle: 'TinyGS / LoRa',
+    description: 'Live satellite packet reception via TinyGS on LilyGO T3 LoRa32. RSSI, SNR, decoded frames, raw hex. Board connects to local Mosquitto broker — no cloud dependency.',
+    status: 'live',
+    color: '#00ccff',
+    hardware: 'LilyGO T3 V1.6.1',
+  },
 ]
 
 export default function Home() {

@@ -367,3 +367,244 @@ input[type=number], input[type=range] { background: #1a1a1a; color: #e0e0e0; bor
   .btn { padding: 6px 14px; }
   button { touch-action: manipulation; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Satellite Page
+═══════════════════════════════════════════════════════════ */
+.sat-page {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.sat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sat-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #00ff88;
+  letter-spacing: 0.04em;
+}
+
+.sat-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.sat-dot {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.sat-dot::before {
+  content: '● ';
+}
+
+.sat-dot-ok  { color: #00ff88; border: 1px solid #00ff8866; }
+.sat-dot-off { color: #555;    border: 1px solid #333; }
+
+.sat-station {
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sat-station-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.sat-station-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sat-station-label {
+  font-size: 0.65rem;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sat-station-val {
+  font-size: 0.85rem;
+  color: #ccc;
+}
+
+.sat-setup-hint {
+  font-size: 0.75rem;
+  color: #888;
+  border-top: 1px solid #1a1a1a;
+  padding-top: 8px;
+}
+
+.sat-setup-hint strong {
+  color: #ffcc44;
+}
+
+.sat-count {
+  font-size: 0.72rem;
+  color: #555;
+}
+
+.sat-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sat-packet {
+  background: #0e0e0e;
+  border: 1px solid #1e1e1e;
+  border-left: 3px solid #333;
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.sat-packet:hover {
+  border-color: #2a2a2a;
+  background: #111;
+}
+
+.sat-packet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sat-packet-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sat-packet-time {
+  font-size: 0.7rem;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-packet-sat {
+  font-size: 0.88rem;
+  color: #ddd;
+  font-weight: 600;
+}
+
+.sat-packet-norad {
+  font-size: 0.68rem;
+  color: #555;
+}
+
+.sat-packet-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sat-badge {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.sat-badge-ok  { background: #00ff8820; color: #00ff88; }
+.sat-badge-err { background: #ff444420; color: #ff4444; }
+
+.sat-rssi {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-snr {
+  font-size: 0.72rem;
+  color: #888;
+}
+
+.sat-expand {
+  font-size: 0.65rem;
+  color: #444;
+  margin-left: 4px;
+}
+
+.sat-packet-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.7rem;
+  color: #666;
+}
+
+.sat-ferr { color: #ffcc44; }
+.sat-mode { color: #44aaff; }
+
+.sat-rssi-bar {
+  font-size: 0.65rem;
+  letter-spacing: -0.5px;
+  font-family: monospace;
+}
+
+.sat-packet-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #1a1a1a;
+  padding-top: 8px;
+  margin-top: 2px;
+}
+
+.sat-data-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sat-data-label {
+  font-size: 0.65rem;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sat-data-value {
+  font-size: 0.75rem;
+  color: #aaa;
+  word-break: break-all;
+}
+
+.sat-hex {
+  font-size: 0.7rem;
+  color: #888;
+  background: #080808;
+  border: 1px solid #1a1a1a;
+  border-radius: 3px;
+  padding: 8px;
+  margin: 0;
+  overflow-x: auto;
+  line-height: 1.5;
+}

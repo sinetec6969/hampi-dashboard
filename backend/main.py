@@ -36,6 +36,7 @@ from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
 from sstv import SSTVDecoder
+from satellite import SatelliteMonitor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -88,6 +89,11 @@ SSTV_IMAGE_DIR: str   = os.getenv(
     os.path.join(os.path.dirname(__file__), "..", "sstv_images"),
 )
 
+# Satellite / TinyGS configuration
+SAT_ENABLE:  bool = os.getenv("SAT_ENABLE", "1") == "1"
+MQTT_HOST:   str  = os.getenv("MQTT_HOST",  "localhost")
+MQTT_PORT:   int  = int(os.getenv("MQTT_PORT", "1883"))
+
 # ---------------------------------------------------------------------------
 # Shared state
 # ---------------------------------------------------------------------------
@@ -107,8 +113,10 @@ airband_clients:    Set[WebSocket] = set()
 meshtastic_clients: Set[WebSocket] = set()
 adsb_clients:       Set[WebSocket] = set()
 sstv_clients:       Set[WebSocket] = set()
+satellite_clients:  Set[WebSocket] = set()
 
 _mode_sstv: Optional[SSTVDecoder] = None
+satellite_monitor: Optional[SatelliteMonitor] = None
 
 # Last-known airband status — returned by /api/airband/status
 airband_status: dict = {
@@ -220,6 +228,18 @@ async def on_sstv_image(filename: str, mode_name: str) -> None:
 
 async def on_sstv_status(status: dict) -> None:
     await broadcast_json(sstv_clients, status)
+
+
+# ---------------------------------------------------------------------------
+# Satellite callbacks
+# ---------------------------------------------------------------------------
+
+async def on_satellite_packet(packet: dict) -> None:
+    await broadcast_json(satellite_clients, packet)
+
+
+async def on_satellite_status(status: dict) -> None:
+    await broadcast_json(satellite_clients, status)
 
 
 async def sstv_loop() -> None:
@@ -340,7 +360,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, airband, meshtastic, adsb_decoder, sdr_task
+    global sdr, decoder, airband, meshtastic, adsb_decoder, sdr_task, satellite_monitor
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -406,6 +426,21 @@ async def lifespan(app: FastAPI):
             logger.warning("ADSBDecoder failed to start — ADS-B disabled", exc_info=True)
             adsb_decoder = None
 
+    # Start satellite monitor (TinyGS via local MQTT)
+    if SAT_ENABLE:
+        try:
+            satellite_monitor = SatelliteMonitor(
+                mqtt_host=MQTT_HOST,
+                mqtt_port=MQTT_PORT,
+                packet_callback=on_satellite_packet,
+                status_callback=on_satellite_status,
+            )
+            await satellite_monitor.start()
+            logger.info("SatelliteMonitor started — mqtt=%s:%d", MQTT_HOST, MQTT_PORT)
+        except Exception:
+            logger.warning("SatelliteMonitor failed to start", exc_info=True)
+            satellite_monitor = None
+
     # Start Meshtastic handler
     if MESH_ENABLE:
         try:
@@ -440,6 +475,8 @@ async def lifespan(app: FastAPI):
         await adsb_decoder.stop()
     if meshtastic is not None:
         await meshtastic.stop()
+    if satellite_monitor is not None:
+        await satellite_monitor.stop()
     logger.info("Shutdown complete")
 
 
@@ -1017,6 +1054,44 @@ async def api_sstv_image(filename: str):
     if not os.path.isfile(path):
         raise HTTPException(status_code=404)
     return FileResponse(path, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Satellite endpoints
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/satellite")
+async def ws_satellite(websocket: WebSocket):
+    await websocket.accept()
+    satellite_clients.add(websocket)
+    try:
+        # Send current state immediately on connect
+        if satellite_monitor:
+            await websocket.send_json({"type": "status", **satellite_monitor.get_status()})
+            for pkt in satellite_monitor.get_packets():
+                await websocket.send_json({"type": "packet", **pkt})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in satellite WebSocket handler")
+    finally:
+        satellite_clients.discard(websocket)
+
+
+@app.get("/api/satellite/status")
+async def api_satellite_status():
+    if satellite_monitor is None:
+        return {"mqtt_connected": False, "station": {}, "packet_count": 0}
+    return satellite_monitor.get_status()
+
+
+@app.get("/api/satellite/packets")
+async def api_satellite_packets():
+    if satellite_monitor is None:
+        return []
+    return satellite_monitor.get_packets()
 
 
 # ---------------------------------------------------------------------------

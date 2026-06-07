@@ -6,3 +6,5 @@ faster-whisper
 httpx
 meshtastic
 pyModeS
+paho-mqtt
+pillow

@@ -8,6 +8,7 @@ import APRSPage from './pages/APRSPage'
 import MeshtasticPage from './pages/MeshtasticPage'
 import AirbandPage from './pages/AirbandPage'
 import SSTVPage from './pages/SSTVPage'
+import SatellitePage from './pages/SatellitePage'
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches)
@@ -27,6 +28,7 @@ const NAV_LINKS = [
   { to: '/meshtastic',  label: 'Meshtastic' },
   { to: '/airband',     label: 'Airband' },
   { to: '/sstv',        label: 'SSTV' },
+  { to: '/satellite',   label: 'Satellite' },
 ]
 
 export default function App() {
@@ -56,6 +58,7 @@ export default function App() {
           <Route path="/meshtastic" element={<MeshtasticPage />} />
           <Route path="/airband"    element={<AirbandPage />} />
           <Route path="/sstv"       element={<SSTVPage />} />
+          <Route path="/satellite"  element={<SatellitePage />} />
         </Routes>
       </div>
     </div>
