@@ -155,11 +155,16 @@ class MeshtasticHandler:
     def _connect_sync(self) -> None:
         """Blocking — runs in thread executor."""
         self._subscribe_pubsub()
-        self._iface = meshtastic.serial_interface.SerialInterface(
-            devPath=self._dev_path,
-            connectNow=True,
-            debugOut=None,
-        )
+        try:
+            self._iface = meshtastic.serial_interface.SerialInterface(
+                devPath=self._dev_path,
+                connectNow=True,
+                debugOut=None,
+            )
+        except SystemExit as exc:
+            # meshtastic calls sys.exit() on ambiguous/missing port — convert so
+            # the retry loop handles it instead of crashing the process.
+            raise RuntimeError(f"meshtastic serial_interface exited: {exc}") from exc
 
     def _close_iface(self) -> None:
         if self._iface is not None:
