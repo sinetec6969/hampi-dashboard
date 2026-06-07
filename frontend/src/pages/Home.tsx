@@ -66,11 +66,20 @@ const MODES: ModeCard[] = [
     color: '#ff8844',
     hardware: 'RTL-SDR + direwolf',
   },
+  {
+    path: '/sstv',
+    icon: '📺',
+    title: 'SSTV',
+    subtitle: '145.800 MHz FM',
+    description: 'Slow Scan Television decoder. Receives Scottie S1/S2, Martin M1/M2, and Robot 36 images. ISS SSTV events and local 2m activity. Switch SDR mode to share device 0.',
+    status: 'live',
+    color: '#ff8800',
+  },
 ]
 
 export default function Home() {
   const [info, setInfo] = useState<SysInfo | null>(null)
-  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | null>(null)
+  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | 'sstv' | null>(null)
   const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
 
@@ -79,7 +88,7 @@ export default function Home() {
     fetch('/api/sdr/mode').then(r => r.json()).then(d => setSdrMode(d.mode)).catch(() => {})
   }, [])
 
-  async function switchMode(mode: 'dmr' | 'airband' | 'adsb') {
+  async function switchMode(mode: 'dmr' | 'airband' | 'adsb' | 'sstv') {
     if (mode === sdrMode || switching) return
     setSwitching(true)
     try {
@@ -145,6 +154,13 @@ export default function Home() {
               disabled={switching}
             >
               ADS-B
+            </button>
+            <button
+              className={'sdr-mode-btn' + (sdrMode === 'sstv' ? ' sdr-mode-active' : '')}
+              onClick={() => switchMode('sstv')}
+              disabled={switching}
+            >
+              SSTV
             </button>
           </div>
           {switching && <span className="sdr-mode-switching">switching…</span>}

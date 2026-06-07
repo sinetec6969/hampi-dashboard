@@ -35,6 +35,7 @@ from airband import AirbandScanner, DEFAULT_CHANNELS
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
+from sstv import SSTVDecoder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -79,6 +80,14 @@ ADSB_GAIN:    float = float(os.getenv("ADSB_GAIN",   "-1"))   # negative = auto
 ADSB_LAT:     float = float(os.getenv("ADSB_LAT",    "0.0"))  # reference for CPR fallback
 ADSB_LON:     float = float(os.getenv("ADSB_LON",    "0.0"))
 
+# SSTV configuration
+SSTV_FREQ:      int   = int(os.getenv("SSTV_FREQ",   "145800000"))
+SSTV_GAIN:      float = float(os.getenv("SSTV_GAIN", "40.0"))
+SSTV_IMAGE_DIR: str   = os.getenv(
+    "SSTV_IMAGE_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "sstv_images"),
+)
+
 # ---------------------------------------------------------------------------
 # Shared state
 # ---------------------------------------------------------------------------
@@ -97,6 +106,9 @@ dmr_clients:        Set[WebSocket] = set()
 airband_clients:    Set[WebSocket] = set()
 meshtastic_clients: Set[WebSocket] = set()
 adsb_clients:       Set[WebSocket] = set()
+sstv_clients:       Set[WebSocket] = set()
+
+_mode_sstv: Optional[SSTVDecoder] = None
 
 # Last-known airband status — returned by /api/airband/status
 airband_status: dict = {
@@ -192,6 +204,47 @@ async def on_mesh_status(status: dict) -> None:
 
 async def on_adsb_aircraft(payload: dict) -> None:
     await broadcast_json(adsb_clients, payload)
+
+
+# ---------------------------------------------------------------------------
+# SSTV callbacks
+# ---------------------------------------------------------------------------
+
+async def on_sstv_line(y: int, r: list, g: list, b: list) -> None:
+    await broadcast_json(sstv_clients, {"type": "line", "y": y, "r": r, "g": g, "b": b})
+
+
+async def on_sstv_image(filename: str, mode_name: str) -> None:
+    await broadcast_json(sstv_clients, {"type": "image_complete", "filename": filename, "mode": mode_name})
+
+
+async def on_sstv_status(status: dict) -> None:
+    await broadcast_json(sstv_clients, status)
+
+
+async def sstv_loop() -> None:
+    loop = asyncio.get_running_loop()
+    logger.info("SSTV loop started — freq=%d Hz", SSTV_FREQ)
+    try:
+        while True:
+            try:
+                iq  = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
+                pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, SSTV_FREQ)
+                if _mode_sstv:
+                    await _mode_sstv.write_audio(pcm)
+                await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("SSTV loop error — retrying in 3 s")
+                await asyncio.sleep(3)
+                try:
+                    sdr.stop()
+                    await loop.run_in_executor(None, sdr.start)
+                except Exception:
+                    logger.exception("SSTV SDR reconnect failed")
+    except asyncio.CancelledError:
+        logger.info("SSTV loop cancelled")
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +432,8 @@ async def lifespan(app: FastAPI):
         await _mode_airband.stop()
     if _mode_adsb is not None:
         await _mode_adsb.stop()
+    if _mode_sstv is not None:
+        await _mode_sstv.stop()
     if airband is not None:
         await airband.stop()
     if adsb_decoder is not None:
@@ -534,6 +589,10 @@ def _cur_adsb() -> Optional[ADSBDecoder]:
     return _mode_adsb if active_sdr_mode == "adsb" else adsb_decoder
 
 
+def _cur_sstv() -> Optional[SSTVDecoder]:
+    return _mode_sstv if active_sdr_mode == "sstv" else None
+
+
 @app.get("/api/sdr/mode")
 async def api_get_sdr_mode():
     return {"mode": active_sdr_mode}
@@ -541,9 +600,9 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb
+    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv
 
-    VALID = ("dmr", "airband", "adsb")
+    VALID = ("dmr", "airband", "adsb", "sstv")
     if mode not in VALID:
         raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
     if mode == active_sdr_mode:
@@ -571,9 +630,20 @@ async def api_set_sdr_mode(mode: str):
             await _mode_adsb.stop()
             _mode_adsb = None
 
+    elif active_sdr_mode == "sstv":
+        if sdr_task is not None and not sdr_task.done():
+            sdr_task.cancel()
+            await asyncio.gather(sdr_task, return_exceptions=True)
+            sdr_task = None
+        if _mode_sstv is not None:
+            await _mode_sstv.stop()
+            _mode_sstv = None
+        await loop.run_in_executor(None, sdr.stop)
+
     # ── Start requested mode ─────────────────────────────────────
     try:
         if mode == "dmr":
+            sdr.freq = INITIAL_FREQ
             await loop.run_in_executor(None, sdr.start)
             await decoder.start()
             sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
@@ -602,12 +672,26 @@ async def api_set_sdr_mode(mode: str):
             )
             await _mode_adsb.start()
 
+        elif mode == "sstv":
+            sdr.freq = SSTV_FREQ
+            sdr.gain = SSTV_GAIN
+            await loop.run_in_executor(None, sdr.start)
+            _mode_sstv = SSTVDecoder(
+                image_dir=SSTV_IMAGE_DIR,
+                line_callback=on_sstv_line,
+                image_callback=on_sstv_image,
+                status_callback=on_sstv_status,
+            )
+            await _mode_sstv.start()
+            sdr_task = asyncio.create_task(sstv_loop(), name="sstv-loop")
+
     except Exception as exc:
-        # Failed — fall back to DMR
         logger.error("Mode switch to %r failed: %s — restoring DMR", mode, exc)
         _mode_airband = None
         _mode_adsb    = None
+        _mode_sstv    = None
         try:
+            sdr.freq = INITIAL_FREQ
             await loop.run_in_executor(None, sdr.start)
             await decoder.start()
             sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
@@ -874,6 +958,65 @@ async def api_adsb_status():
         "lat_ref":       ADSB_LAT,
         "lon_ref":       ADSB_LON,
     }
+
+
+# ---------------------------------------------------------------------------
+# SSTV WebSocket + REST endpoints
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/sstv")
+async def ws_sstv(websocket: WebSocket):
+    await websocket.accept()
+    sstv_clients.add(websocket)
+    logger.info("SSTV client connected — total=%d", len(sstv_clients))
+    try:
+        cur = _cur_sstv()
+        if cur:
+            await websocket.send_text(json.dumps(cur.status_dict()))
+    except Exception:
+        pass
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in SSTV WebSocket handler")
+    finally:
+        sstv_clients.discard(websocket)
+        logger.info("SSTV client disconnected — total=%d", len(sstv_clients))
+
+
+@app.get("/api/sstv/status")
+async def api_sstv_status():
+    cur = _cur_sstv()
+    if cur:
+        return cur.status_dict()
+    return {"state": "disabled", "mode": "", "line": 0, "total_lines": 0, "signal_rms": 0.0}
+
+
+@app.get("/api/sstv/images")
+async def api_sstv_images():
+    image_dir = os.path.join(os.path.dirname(__file__), "..", "sstv_images")
+    try:
+        files = sorted(
+            [f for f in os.listdir(image_dir) if f.endswith(".png")],
+            reverse=True,
+        )
+        return [{"filename": f, "url": f"/api/sstv/images/{f}"} for f in files]
+    except FileNotFoundError:
+        return []
+
+
+@app.get("/api/sstv/images/{filename}")
+async def api_sstv_image(filename: str):
+    from fastapi.responses import FileResponse
+    if not filename.endswith(".png") or "/" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = os.path.join(os.path.dirname(__file__), "..", "sstv_images", filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/png")
 
 
 # ---------------------------------------------------------------------------
