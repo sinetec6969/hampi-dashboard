@@ -2,8 +2,8 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.2.1_piperrrrr (2026-06-05)  
-> **Status:** Pre-beta. DMR (metadata), ADS-B, Airband AM, and Meshtastic are all live. Mobile-responsive. Single RTL-SDR dongle covers all SDR modes via the mode switcher; second dongle runs Airband dedicated. DMR audio decode was removed — AMBE via dsd-fme had persistent sample-rate issues on Pi 4; DMR page is now metadata-only (talkgroup, caller, call history, map).
+> **Current version:** 0.2.2_rustylives (2026-06-08)  
+> **Status:** Pre-beta. DMR (metadata), ADS-B, Airband AM, Meshtastic, SSTV, and Satellite telemetry (via TinyGS hardware → local MQTT) are all live. Mobile-responsive. Single RTL-SDR dongle covers all SDR modes via the mode switcher; second dongle runs Airband dedicated. DMR audio decode was removed — AMBE via dsd-fme had persistent sample-rate issues on Pi 4; DMR page is now metadata-only (talkgroup, caller, call history, map).
 
 ---
 
@@ -209,30 +209,22 @@ RTL-SDR (or VHF radio + audio in)
 
 ---
 
-### Satellite Telemetry (433 MHz / TinyGS)
+### ✅ Satellite Telemetry (TinyGS hardware + local MQTT)
 
-Receive and decode satellite LoRa telemetry and upload frames to the TinyGS ground station network.
+Receive satellite LoRa telemetry via a TinyGS-firmware ESP32 board, brokered through a local Mosquitto instance — **no data leaves the LAN**.
 
-**Architecture:**
-```
-RTL-SDR (mode-switch or dedicated dongle)
-  └─ rtl_sdr subprocess → raw IQ at 250 kHz, tuned to sat freq
-       └─ rtl-lora (C) OR Python numpy chirp demodulator
-            └─ decoded packet bytes + RSSI/SNR
-                 └─ satellite.py (SatelliteDecoder)
-                      ├─ MQTT → mqtt.tinygs.com  (paho-mqtt)
-                      ├─ /ws/satellite  WebSocket
-                      └─ /api/satellite/* REST
-```
+**Implemented (0.2.2_rustylives):**
+- **Hardware:** LilyGO T3 V1.6.1 LoRa32 (SX1276, 433/868/915 MHz). Heltec WiFi LoRa 32 V3 is also a known-working TinyGS target.
+- **Firmware (modified TinyGS):** `MQTT_Client.cpp` uses `WiFiClientSecure::setInsecure()` instead of `setCACert(newRoot_CA)` so the board accepts the Pi's self-signed cert on Mosquitto port 8883. Keeping `SECURE_MQTT` enabled is required — switching to plain `WiFiClient` changes the binary layout enough to break SPI radio init (RADIOLIB_ERR_CHIP_NOT_FOUND / -18). Version check bypassed; WiFi + MQTT config injected on boot.
+- **Pi-side broker:** Mosquitto on ports 1883 (plain) + 8883 (TLS, self-signed). `allow_anonymous true`. Certs in `/etc/mosquitto/`.
+- **Backend:** `satellite.py` (`SatelliteMonitor`) — `paho-mqtt` subscribes `tinygs/#`, decodes `tele/ping` (board telemetry), `tele/rx` (received satellite packet — RSSI/SNR/freq/CRC/raw), `stat/status` (station identity).
+- **API:** `/ws/satellite`, `GET /api/satellite/status`, `GET /api/satellite/packets`.
+- **Frontend:** `SatellitePage.tsx` — WS + MQTT status dots, station info row (board IP, free mem, WiFi RSSI, instantaneous radio RSSI), packet feed with expandable hex/ASCII dump, RSSI bar, CRC/noisy badges.
 
-**Phases:**
-1. **Research** — clone `tinygs/tinyGS` for satellite DB; confirm MQTT payload format; pick target sats visible from this location
-2. **LoRa decoder** — try `rtl-lora` (C, no GNU Radio) first; fall back to Python/numpy chirp dechirp → FFT → grey decode → Hamming FEC; target SF7–SF12, BW 125/250/500 kHz
-3. **TinyGS MQTT upload** — `paho-mqtt`; payload `{ "packet": "<base64>", "rssi", "snr", "frequency", "satelliteName" }`
-4. **Dashboard page** — `SatellitePage.tsx`: live packet log, hex/ASCII frame dump, RSSI/SNR, satellite name + pass time, upload status badge
-5. **Pass prediction** *(stretch)* — `skyfield` + Celestrak TLE fetch; auto-tune RTL-SDR on approach
-
-**Fallback:** Heltec WiFi LoRa 32 V3 is a TinyGS-compatible device — if pure-SDR LoRa decode proves unreliable, a second Heltec (~$12) gives a rock-solid hardware receiver.
+**Known limitations / future:**
+- One sat target per session — multi-band requires re-config or second board
+- No pass-prediction overlay yet (`skyfield` + Celestrak TLE — moved to backlog)
+- No upload to public TinyGS network (intentional — privacy-first / local-only)
 
 ---
 
@@ -367,3 +359,4 @@ talkgroups:
 ✅ ADS-B pyModeS 3.3.0 rewrite — 0.2.0_n3wb361nn1n6  
 ✅ Mobile-responsive layout — 0.2.1_piperrrrr  
 ✅ SSTV image decoder (Scottie S1/S2, Martin M1/M2, Robot 36) — 2026-06-06  
+✅ Satellite telemetry (TinyGS hardware → local MQTT) — 0.2.2_rustylives  

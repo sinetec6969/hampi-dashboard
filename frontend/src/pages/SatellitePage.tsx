@@ -217,10 +217,10 @@ export default function SatellitePage() {
               <span className="sat-station-val">{station.ip}</span>
             </span>
           )}
-          {station.vbat != null && (
+          {station.vbat != null && station.vbat > 0 && (
             <span className="sat-station-item">
               <span className="sat-station-label">Vbat</span>
-              <span className="sat-station-val">{station.vbat?.toFixed(2)} V</span>
+              <span className="sat-station-val">{station.vbat.toFixed(2)} V</span>
             </span>
           )}
           {station.mem != null && (

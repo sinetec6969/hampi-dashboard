@@ -567,7 +567,7 @@ async def api_sysinfo():
         "hostname":     socket.gethostname(),
         "local_ip":     None,
         "tailscale_ip": None,
-        "version":      "0.2.0_n3wb361nn1n6",
+        "version":      "0.2.2_rustylives",
     }
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

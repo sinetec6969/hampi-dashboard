@@ -29,7 +29,7 @@ Digital voice decoded. Aircraft tracked. Mesh nodes mapped. SSTV images received
 | 📊 Waterfall | ✅ Live | 2.4 MHz FFT · click-to-tune · memory channels |
 | 📱 Mobile UI | ✅ Live | Responsive layout · auto-detects phone vs desktop |
 | 📻 APRS | 🔨 Next | `direwolf` TNC · station map · packet log |
-| 🛰️ Satellite | 🗺️ Planned | RTL-SDR LoRa decode · TinyGS MQTT upload · pass prediction |
+| 🛰️ Satellite | ✅ Live | TinyGS hardware receiver (LilyGO T3 LoRa32) · local MQTT broker · live telemetry + RX packet feed |
 
 One dongle covers all SDR modes via the home-page mode-switcher. Add more dongles to run them simultaneously.
 
@@ -268,7 +268,11 @@ Check `groups $USER` includes `dialout`. Run `ls /dev/ttyUSB*`. If ModemManager 
 
 ## Version History
 
-### 2026-06-07
+### 0.2.2_rustylives — 2026-06-08
+- **Satellite telemetry live** — TinyGS-firmware LilyGO T3 V1.6.1 LoRa32 board connects to local Mosquitto over TLS (port 8883, `setInsecure()` cert bypass against self-signed cert) instead of mqtt.tinygs.com. `backend/satellite.py` subscribes `tinygs/#`, parses `tele/ping`, `tele/rx`, and `stat/status` payloads. `SatellitePage.tsx` shows live station telemetry (WiFi RSSI, free mem, radio init status, instantaneous LoRa RSSI) and a packet feed with hex/ASCII dump. Vbat row hidden when USB-powered.
+- **Meshtastic crash fix** — `meshtastic_handler.py` catches `SystemExit` from the library's port auto-detect when multiple serial devices are present.
+
+### 0.2.1_piperrrrr + SSTV — 2026-06-07
 - **SSTV decoder** — `sstv.py`: full VIS header detect, per-line sync hunt, Hilbert instantaneous-frequency decode, Scottie S1/S2 (GBR), Martin M1/M2 (RGB), Robot 36 (YCbCr). `SSTVPage.tsx`: live canvas, image gallery, lightbox, signal RMS meter. SSTV added to SDR mode switcher (device 0, 145.800 MHz FM).
 
 ### 0.2.1_piperrrrr — 2026-06-05
@@ -299,7 +303,7 @@ See [ROADMAP.md](ROADMAP.md) for full specs, architecture plans, and implementat
 
 - **APRS** — `direwolf` TNC, 144.390 MHz, station map, packet log, weather decode
 - **AX.25 packet terminal** — KISS TNC, heard-stations log, connected-mode BBS terminal
-- **Satellite telemetry** — RTL-SDR LoRa decode, TinyGS MQTT upload, pass prediction
+- **Satellite pass prediction** — `skyfield` + Celestrak TLE, alert UI on TinyGS board pass window
 - **config.yaml** — replace env vars, editable channel/talkgroup lists
 - **Systemd service** — auto-start on boot
 
