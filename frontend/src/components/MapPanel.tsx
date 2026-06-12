@@ -31,6 +31,8 @@ export default function MapPanel() {
   const lookedUp = useRef<Set<number>>(new Set())
 
   useEffect(() => {
+    let alive = true
+    let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
       const ws = new WebSocket(`ws://${location.host}/ws/dmr`)
       wsRef.current = ws
@@ -70,11 +72,15 @@ export default function MapPanel() {
           .catch(() => {})
       }
 
-      ws.onclose = () => setTimeout(connect, 3000)
+      ws.onclose = () => { if (alive) retry = setTimeout(connect, 3000) }
       ws.onerror = () => console.error('Map WS error')
     }
     connect()
-    return () => { wsRef.current?.close() }
+    return () => {
+      alive = false
+      if (retry) clearTimeout(retry)
+      wsRef.current?.close()
+    }
   }, [])
 
   return (

@@ -51,13 +51,15 @@ export default function Waterfall({ centerFreqHz, onClickTune }: Props) {
     })
     ro.observe(container)
 
+    let alive = true
+    let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
       const ws = new WebSocket(`ws://${location.host}/ws/waterfall`)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
       ws.onmessage = e => { rowBuf.current.push(new Float32Array(e.data)) }
       ws.onerror   = () => console.error('Waterfall WebSocket error')
-      ws.onclose   = () => setTimeout(connect, 3000)
+      ws.onclose   = () => { if (alive) retry = setTimeout(connect, 3000) }
     }
     connect()
 
@@ -129,6 +131,8 @@ export default function Waterfall({ centerFreqHz, onClickTune }: Props) {
     rafRef.current = requestAnimationFrame(frame)
 
     return () => {
+      alive = false
+      if (retry) clearTimeout(retry)
       cancelAnimationFrame(rafRef.current)
       wsRef.current?.close()
       ro.disconnect()

@@ -35,6 +35,8 @@ export default function DMRPanel() {
   const lastSrcRef = useRef(0)
 
   useEffect(() => {
+    let alive = true
+    let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
       const ws = new WebSocket(`ws://${location.host}/ws/dmr`)
       wsRef.current = ws
@@ -78,11 +80,15 @@ export default function DMRPanel() {
         setFrames(prev => [f, ...prev].slice(0, 20))
       }
 
-      ws.onclose = () => setTimeout(connect, 3000)
+      ws.onclose = () => { if (alive) retry = setTimeout(connect, 3000) }
       ws.onerror = () => console.error('DMR WebSocket error')
     }
     connect()
-    return () => { wsRef.current?.close() }
+    return () => {
+      alive = false
+      if (retry) clearTimeout(retry)
+      wsRef.current?.close()
+    }
   }, [])
 
   const callsignLine = activeAlias

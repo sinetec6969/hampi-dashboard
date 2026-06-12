@@ -121,6 +121,7 @@ class DMRDecoder:
         # Call tracking state (for history log)
         self._recording:         bool             = False
         self._active_call:       Optional[dict]   = None
+        self._last_voice_ts:     float            = 0.0
         # Set by _clear_call (sync); drained by _read_stderr (async)
         self._pending_finalize:  Optional[dict]   = None
 
@@ -235,7 +236,7 @@ class DMRDecoder:
             self._active_cc     = int(m.group(2))
             raw_ftype           = m.group(3).upper()
             self._pending_ftype = _map_ftype(raw_ftype)
-            if raw_ftype.startswith("VLC"):
+            if raw_ftype.startswith(("VLC", "TLC")):
                 self._clear_call(self._active_slot)
             frame = self._make_frame(line)
             self._maybe_start_recording(frame)
@@ -248,7 +249,7 @@ class DMRDecoder:
                 self._active_cc     = int(m.group(1))
                 raw_ftype           = m.group(2).upper()
                 self._pending_ftype = _map_ftype(raw_ftype)
-                if raw_ftype.startswith("VLC"):
+                if raw_ftype.startswith(("VLC", "TLC")):
                     self._clear_call(self._active_slot)
                 frame = self._make_frame(line)
                 self._maybe_start_recording(frame)
@@ -301,8 +302,9 @@ class DMRDecoder:
         return None
 
     def _clear_call(self, slot: int) -> None:
-        """Reset per-call fields when a new Voice LC Header is detected."""
+        """Reset per-call fields on VLC (new call) or TLC (call terminator)."""
         if self._recording and self._active_call:
+            self._active_call["end_time"] = self._last_voice_ts or time.time()
             self._pending_finalize = dict(self._active_call)
         self._recording   = False
         self._active_call = None
@@ -330,7 +332,10 @@ class DMRDecoder:
         )
 
     def _maybe_start_recording(self, frame: "DMRFrame") -> None:
-        if frame.frame_type == "VOICE" and frame.src_id != 0 and not self._recording:
+        if frame.frame_type != "VOICE" or frame.src_id == 0:
+            return
+        self._last_voice_ts = time.time()
+        if not self._recording:
             self._recording  = True
             self._rec_start  = time.time()
             self._active_call = {
@@ -345,7 +350,7 @@ class DMRDecoder:
     async def _do_finalize(self, call_info: dict) -> None:
         if not self._call_end_cb:
             return
-        end_time   = time.time()
+        end_time   = call_info.get("end_time") or time.time()
         start_time = call_info.get("start_time", end_time)
         src_id     = call_info.get("src_id", 0)
         record = {

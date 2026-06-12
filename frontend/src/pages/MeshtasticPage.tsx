@@ -138,6 +138,8 @@ export default function MeshtasticPage() {
   const wsRef      = useRef<WebSocket | null>(null)
   const msgEndRef  = useRef<HTMLDivElement | null>(null)
   const inputRef   = useRef<HTMLInputElement | null>(null)
+  const aliveRef   = useRef(true)
+  const retryRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── WebSocket ─────────────────────────────────────────────────────────
 
@@ -176,14 +178,20 @@ export default function MeshtasticPage() {
 
     ws.onclose = () => {
       wsRef.current = null
+      if (!aliveRef.current) return
       setStatus(s => ({ ...s, connected: false }))
-      setTimeout(connectWs, 4000)
+      retryRef.current = setTimeout(connectWs, 4000)
     }
   }, [])
 
   useEffect(() => {
+    aliveRef.current = true
     connectWs()
-    return () => { wsRef.current?.close() }
+    return () => {
+      aliveRef.current = false
+      if (retryRef.current) clearTimeout(retryRef.current)
+      wsRef.current?.close()
+    }
   }, [connectWs])
 
   // Fetch channels once on connect

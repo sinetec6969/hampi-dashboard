@@ -20,6 +20,8 @@ export default function ContactsPanel() {
   const lookedUp = useRef<Set<number>>(new Set())
 
   useEffect(() => {
+    let alive = true
+    let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
       const ws = new WebSocket(`ws://${location.host}/ws/dmr`)
       wsRef.current = ws
@@ -73,11 +75,15 @@ export default function ContactsPanel() {
         }
       }
 
-      ws.onclose = () => setTimeout(connect, 3000)
+      ws.onclose = () => { if (alive) retry = setTimeout(connect, 3000) }
       ws.onerror = () => console.error('Contacts WS error')
     }
     connect()
-    return () => { wsRef.current?.close() }
+    return () => {
+      alive = false
+      if (retry) clearTimeout(retry)
+      wsRef.current?.close()
+    }
   }, [])
 
   function qrzLink(callsign: string) {
