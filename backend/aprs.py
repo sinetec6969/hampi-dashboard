@@ -40,12 +40,10 @@ class APRSDecoder:
 
     def __init__(
         self,
-        sample_rate: int = 48_000,
         max_packets: int = 200,
         packet_callback: Optional[PacketCb] = None,
     ):
-        self.sample_rate = sample_rate
-        self._cb         = packet_callback
+        self._cb = packet_callback
 
         self.packets:  deque[dict]     = deque(maxlen=max_packets)
         self.stations: dict[str, dict] = {}
@@ -57,11 +55,10 @@ class APRSDecoder:
         self._active = False
 
     async def start(self) -> None:
-        # -t 0 no colors, -q hd quiet (audio levels + descriptions),
-        # -n 1 mono, -b 16 bit, "-" audio from stdin
+        # -t 0 no colors, -q hd quiet (audio levels + descriptions);
+        # audio device/rate/channels come from direwolf.conf (stdin → null)
         conf = os.path.join(os.path.dirname(__file__), "direwolf.conf")
-        cmd = ["direwolf", "-c", conf, "-t", "0", "-q", "hd", "-n", "1",
-               "-r", str(self.sample_rate), "-b", "16", "-"]
+        cmd = ["direwolf", "-c", conf, "-t", "0", "-q", "hd"]
         logger.info("Starting direwolf: %s", " ".join(cmd))
         self._proc = await asyncio.create_subprocess_exec(
             *cmd,

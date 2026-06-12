@@ -182,34 +182,23 @@ aprs:
 
 ## Roadmap — Further Out
 
-### AX.25 Packet Terminal
+### ✅ AX.25 Packet Terminal (RX monitor — phases 1–3)
 
-Raw AX.25 frame monitoring and a connected-mode terminal via `direwolf` KISS TNC — packet BBS access, digipeater trace, and heard-station log, all in-browser.
+Raw AX.25 frame monitoring via `direwolf` KISS TNC, in-browser.
 
-**Architecture:**
-```
-RTL-SDR (or VHF radio + audio in)
-  └─ direwolf (TNC) — KISS over TCP port 8001
-       └─ ax25.py (AX25Decoder)
-            ├─ UI frames → heard-stations table + raw frame log
-            ├─ Connected sessions (SABM/UA/I-frames) → terminal relay
-            ├─ /ws/ax25        WebSocket (live frame stream)
-            └─ /api/ax25/*     REST (heard list, frame history)
-```
+**Implemented (2026-06-12):**
+- `ax25.py` — `AX25Decoder`: asyncio KISS TCP client on the **shared APRS-mode direwolf** (`KISSPORT 8001` in `direwolf.conf`); KISS deframe/unescape; full AX.25 decode (dest/src/up-to-8 digis with repeated `*` flag, I/S/U control byte incl. SABM/UA/DISC/RR/REJ, PID, info); 500-frame rolling log + heard-stations registry
+- `main.py` — AX25Decoder starts/stops with `"aprs"` SDR mode; `/ws/ax25`; `GET /api/ax25/status`, `/api/ax25/frames`, `/api/ax25/heard`. `aprs_loop()` now broadcasts waterfall FFT and demodulates at `sdr.freq` (not fixed APRS_FREQ) so `/api/tune` retunes the decode chain live
+- `AX25Page.tsx` — waterfall (click-to-tune) + frequency/gain text controls + green-on-black terminal console with autoscroll; mode banner with one-click switch to APRS mode
+- `direwolf.conf` — `ADEVICE stdin null` (no ALSA output grab), `ARATE 48000`, `AGWPORT 0`, `KISSPORT 8001`
 
-**Phases:**
-1. **KISS framing** — `direwolf` launched with `KISSPORT 8001`; Python asyncio KISS TCP client; strip framing, emit raw AX.25 bytes
-2. **Frame decode** — parse address field (source, dest, up to 8 digipeaters), control byte (UI / SABM / UA / I / S), PID, info field; log to rolling deque
-3. **Dashboard page** — `AX25Page.tsx`: live frame log (timestamp · source · dest · via path · info), heard-stations table sorted by last-seen, hex/ASCII frame dump panel
-4. **Connected terminal** *(stretch)* — relay SABM/I-frame exchange over a second WebSocket; in-browser terminal for packet BBS connects
-5. **Beacon inject** *(stretch)* — `ax25.write()` via KISS; transmit beacon through a TX-capable rig
+**Resolved open questions:** shares the APRS direwolf instance (one process, stdout→aprslib + KISS→ax25.py); RX-only first; RTL-SDR direct.
 
-**Dependencies:** `direwolf` (already needed for APRS); no additional pip packages
+**Remaining phases — blocked on TX hardware (BTech APRS-K1 cable + radio):**
+4. **Connected terminal** — relay SABM/I-frame exchange over a second WebSocket; in-browser packet BBS connects
+5. **Beacon inject** — KISS write; direwolf VOX PTT through the APRS-K1
 
-**Open questions:**
-- Share `direwolf` instance with APRS or run a second instance on a different port?
-- RX-only monitor first, or target connected-mode terminal from the start?
-- RTL-SDR direct or VHF radio audio-in via discriminator tap?
+**RX only until then** — the dashboard transmits nothing.
 
 ---
 
@@ -286,7 +275,7 @@ RTL-SDR device 0 (mode-switch)
 1. ~~**config.yaml + systemd**~~ — ✅ done (2026-06-12): `config.yaml.example` + `hampi-dashboard.service`
 2. ~~**udev rules**~~ — ✅ done (2026-06-12): `99-hampi.rules` + serial-string `rtl_device` config
 3. ~~**APRS**~~ — ✅ done (2026-06-12); TX via BTech APRS-K1 cable is the follow-on
-4. **AX.25 packet terminal** — shares `direwolf` with APRS; low marginal effort after APRS lands
+4. ~~**AX.25 packet terminal**~~ — ✅ RX monitor done (2026-06-12); connected-mode + beacon TX blocked on APRS-K1 + radio
 5. **ADS-B flight lookup** — local `aircraft.csv`; no new hardware required
 6. **Talkgroup aliases + RadioID local DB** — DMR polish
 7. ~~**SSTV image reception**~~ — ✅ done

@@ -34,6 +34,7 @@ from starlette.websockets import WebSocketState
 from adsb import ADSBDecoder
 from airband import AirbandScanner, DEFAULT_CHANNELS
 from aprs import APRSDecoder
+from ax25 import AX25Decoder
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
@@ -149,9 +150,11 @@ adsb_clients:       Set[WebSocket] = set()
 sstv_clients:       Set[WebSocket] = set()
 satellite_clients:  Set[WebSocket] = set()
 aprs_clients:       Set[WebSocket] = set()
+ax25_clients:       Set[WebSocket] = set()
 
 _mode_sstv: Optional[SSTVDecoder] = None
 _mode_aprs: Optional[APRSDecoder] = None
+_mode_ax25: Optional[AX25Decoder] = None  # rides along with aprs mode (shared direwolf)
 satellite_monitor: Optional[SatelliteMonitor] = None
 
 # Last-known airband status — returned by /api/airband/status
@@ -282,14 +285,23 @@ async def on_aprs_packet(msg: dict) -> None:
     await broadcast_json(aprs_clients, msg)
 
 
+async def on_ax25_frame(msg: dict) -> None:
+    await broadcast_json(ax25_clients, msg)
+
+
 async def aprs_loop() -> None:
     loop = asyncio.get_running_loop()
-    logger.info("APRS loop started — freq=%d Hz", APRS_FREQ)
+    logger.info("APRS loop started — freq=%d Hz", sdr.freq)
+    step = CHUNK_SIZE // FFT_PER_CHUNK
     try:
         while True:
             try:
-                iq  = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
-                pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, APRS_FREQ)
+                iq = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
+                for k in range(FFT_PER_CHUNK):
+                    fft_bins = sdr.compute_fft(iq[k * step:], n_fft=N_FFT)
+                    await broadcast_bytes(waterfall_clients, fft_bins.tobytes())
+                # demod at sdr.freq so /api/tune retunes the decoder too
+                pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, sdr.freq)
                 if _mode_aprs:
                     await _mode_aprs.write_audio(pcm)
                 await asyncio.sleep(0)
@@ -537,6 +549,8 @@ async def lifespan(app: FastAPI):
         await _mode_sstv.stop()
     if _mode_aprs is not None:
         await _mode_aprs.stop()
+    if _mode_ax25 is not None:
+        await _mode_ax25.stop()
     if airband is not None:
         await airband.stop()
     if adsb_decoder is not None:
@@ -702,6 +716,10 @@ def _cur_aprs() -> Optional[APRSDecoder]:
     return _mode_aprs if active_sdr_mode == "aprs" else None
 
 
+def _cur_ax25() -> Optional[AX25Decoder]:
+    return _mode_ax25 if active_sdr_mode == "aprs" else None
+
+
 @app.get("/api/sdr/mode")
 async def api_get_sdr_mode():
     return {"mode": active_sdr_mode}
@@ -709,7 +727,7 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs
+    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25
 
     VALID = ("dmr", "airband", "adsb", "sstv", "aprs")
     if mode not in VALID:
@@ -757,6 +775,9 @@ async def api_set_sdr_mode(mode: str):
         if _mode_aprs is not None:
             await _mode_aprs.stop()
             _mode_aprs = None
+        if _mode_ax25 is not None:
+            await _mode_ax25.stop()
+            _mode_ax25 = None
         await loop.run_in_executor(None, sdr.stop)
 
     # ── Start requested mode ─────────────────────────────────────
@@ -811,6 +832,8 @@ async def api_set_sdr_mode(mode: str):
             await loop.run_in_executor(None, sdr.start)
             _mode_aprs = APRSDecoder(packet_callback=on_aprs_packet)
             await _mode_aprs.start()
+            _mode_ax25 = AX25Decoder(frame_callback=on_ax25_frame)
+            await _mode_ax25.start()
             sdr_task = asyncio.create_task(aprs_loop(), name="aprs-loop")
 
     except Exception as exc:
@@ -819,6 +842,7 @@ async def api_set_sdr_mode(mode: str):
         _mode_adsb    = None
         _mode_sstv    = None
         _mode_aprs    = None
+        _mode_ax25    = None
         try:
             sdr.freq = INITIAL_FREQ
             sdr.gain = INITIAL_GAIN
@@ -1194,6 +1218,53 @@ async def api_aprs_stations():
 async def api_aprs_packets():
     cur = _cur_aprs()
     return list(cur.packets) if cur else []
+
+
+# ---------------------------------------------------------------------------
+# AX.25 WebSocket + REST endpoints (active in aprs mode — shared direwolf)
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/ax25")
+async def ws_ax25(websocket: WebSocket):
+    await websocket.accept()
+    ax25_clients.add(websocket)
+    logger.info("AX25 client connected — total=%d", len(ax25_clients))
+    try:
+        cur = _cur_ax25()
+        if cur:
+            await websocket.send_text(json.dumps(cur.status_dict()))
+    except Exception:
+        pass
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in AX25 WebSocket handler")
+    finally:
+        ax25_clients.discard(websocket)
+        logger.info("AX25 client disconnected — total=%d", len(ax25_clients))
+
+
+@app.get("/api/ax25/status")
+async def api_ax25_status():
+    cur = _cur_ax25()
+    if cur:
+        return cur.status_dict()
+    return {"type": "status", "connected": False, "frames": 0, "heard": 0}
+
+
+@app.get("/api/ax25/frames")
+async def api_ax25_frames():
+    cur = _cur_ax25()
+    return list(cur.frames) if cur else []
+
+
+@app.get("/api/ax25/heard")
+async def api_ax25_heard():
+    cur = _cur_ax25()
+    return list(cur.heard.values()) if cur else []
 
 
 # ---------------------------------------------------------------------------

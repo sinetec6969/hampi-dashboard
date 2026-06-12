@@ -8,6 +8,7 @@ import APRSPage from './pages/APRSPage'
 import MeshtasticPage from './pages/MeshtasticPage'
 import AirbandPage from './pages/AirbandPage'
 import SSTVPage from './pages/SSTVPage'
+import AX25Page from './pages/AX25Page'
 import SatellitePage from './pages/SatellitePage'
 
 function useIsMobile() {
@@ -25,6 +26,7 @@ const NAV_LINKS = [
   { to: '/dmr',         label: 'DMR' },
   { to: '/adsb',        label: 'ADS-B' },
   { to: '/aprs',        label: 'APRS' },
+  { to: '/ax25',        label: 'AX.25' },
   { to: '/meshtastic',  label: 'Meshtastic' },
   { to: '/airband',     label: 'Airband' },
   { to: '/sstv',        label: 'SSTV' },
@@ -55,6 +57,7 @@ export default function App() {
           <Route path="/dmr"        element={<DMRPage />} />
           <Route path="/adsb"       element={<ADSBPage />} />
           <Route path="/aprs"       element={<APRSPage />} />
+          <Route path="/ax25"       element={<AX25Page />} />
           <Route path="/meshtastic" element={<MeshtasticPage />} />
           <Route path="/airband"    element={<AirbandPage />} />
           <Route path="/sstv"       element={<SSTVPage />} />
