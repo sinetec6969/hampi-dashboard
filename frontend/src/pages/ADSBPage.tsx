@@ -7,6 +7,10 @@ import 'leaflet/dist/leaflet.css'
 
 interface Aircraft {
   icao:      string
+  reg:       string | null
+  actype:    string | null
+  model:     string | null
+  operator:  string | null
   callsign:  string | null
   altitude:  number | null
   lat:       number | null
@@ -216,7 +220,8 @@ export default function ADSBPage() {
               >
                 <Popup>
                   <div className="adsb-popup">
-                    <div className="adsb-popup-call">{ac.callsign ?? ac.icao.toUpperCase()}</div>
+                    <div className="adsb-popup-call">{ac.callsign ?? ac.reg ?? ac.icao.toUpperCase()}</div>
+                    {(ac.actype || ac.operator) && <div>{[ac.actype, ac.operator].filter(Boolean).join(' · ')}</div>}
                     <div>{fmtAlt(ac.altitude)}</div>
                   </div>
                 </Popup>
@@ -235,9 +240,18 @@ export default function ADSBPage() {
                 </span>
                 <button className="adsb-close-btn" onClick={() => setSelected(null)}>×</button>
               </div>
-              <div className="adsb-detail-icao">{selAc.icao.toUpperCase()}</div>
+              <div className="adsb-detail-icao">
+                {selAc.icao.toUpperCase()}
+                {selAc.operator ? ` · ${selAc.operator}` : ''}
+              </div>
 
               <div className="adsb-detail-grid">
+                <span className="adsb-detail-label">Reg</span>
+                <span className="adsb-detail-val">{selAc.reg ?? '—'}</span>
+
+                <span className="adsb-detail-label">Type</span>
+                <span className="adsb-detail-val">{selAc.model ?? selAc.actype ?? '—'}</span>
+
                 <span className="adsb-detail-label">Altitude</span>
                 <span className="adsb-detail-val">{fmtAlt(selAc.altitude)}</span>
 
@@ -286,7 +300,7 @@ export default function ADSBPage() {
                         onClick={() => ac.lat !== null && setSelected(ac.icao)}
                       >
                         <span className="adsb-list-plane" style={{ color: altColor(ac.altitude) }}>✈</span>
-                        <span className="adsb-list-id">{ac.callsign ?? ac.icao.toUpperCase()}</span>
+                        <span className="adsb-list-id">{ac.callsign ?? ac.reg ?? ac.icao.toUpperCase()}</span>
                         <span className="adsb-list-hdg">{ac.heading !== null ? ac.heading + '°' : '—'}</span>
                         <span className="adsb-list-spd">{ac.speed !== null ? ac.speed + 'kt' : '—'}</span>
                       </div>

@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import sqlite3
 import time
 from typing import Callable, Awaitable, Optional
 
@@ -11,6 +13,27 @@ logger = logging.getLogger(__name__)
 EXPIRE_S  = 60.0
 PRUNE_S   = 15.0
 MAX_TRACK = 60
+
+# Local aircraft registry — build with build_aircraft_db.py (optional)
+_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "aircraft.db")
+_db: Optional[sqlite3.Connection] = None
+if os.path.isfile(_DB_PATH):
+    _db = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    logger.info("aircraft.db loaded: %s", _DB_PATH)
+
+
+def db_lookup(icao: str) -> dict:
+    if _db is None:
+        return {"reg": None, "actype": None, "model": None, "operator": None}
+    row = _db.execute(
+        "SELECT reg, type, model, operator FROM aircraft WHERE icao=?", (icao,)
+    ).fetchone()
+    return {
+        "reg":      (row and row[0]) or None,
+        "actype":   (row and row[1]) or None,
+        "model":    (row and row[2]) or None,
+        "operator": (row and row[3]) or None,
+    }
 
 AircraftCb = Callable[[dict], Awaitable[None]]
 
@@ -117,6 +140,7 @@ class ADSBDecoder:
             if icao not in self.aircraft:
                 self.aircraft[icao] = {
                     "icao":      icao,
+                    **db_lookup(icao),
                     "callsign":  None,
                     "altitude":  None,
                     "lat":       None,

@@ -79,8 +79,9 @@ ADSB_LAT=0.0        # reference latitude — enables faster CPR decode
 ADSB_LON=0.0        # reference longitude
 ```
 
+**Flight lookup (2026-06-12):** local aircraft database — `build_aircraft_db.py` distills the OpenSky metadata CSV (95 MB, one-time download) into `aircraft.db` (sqlite, 34 MB, 516k aircraft). `adsb.py` joins registration / type / model / operator at first sighting; ADSBPage shows them in popup, detail panel, and list (callsign → reg → icao fallback). Lookups are local — no runtime cloud dependency.
+
 **Known limitations:**
-- No ICAO → airline/registration database (local `aircraft.csv` planned)
 - No squawk/emergency flag display
 - Surface position frames (TC 5–8) not decoded
 
@@ -261,7 +262,7 @@ RTL-SDR device 0 (mode-switch)
 - [x] config.yaml — env vars still override; editable airband channel list (talkgroup aliases still pending, see item 6)
 - [x] Systemd service — `hampi-dashboard.service` in repo root; auto-start and restart on boot
 - [x] udev rules — `99-hampi.rules` (meshtastic/tinygs tty symlinks); rtl_device config keys accept EEPROM serial strings for stable dongle selection
-- [ ] ADS-B flight lookup — local `aircraft.csv` for airline/registration data
+- [x] ADS-B flight lookup — local `aircraft.db` sqlite (OpenSky snapshot via `build_aircraft_db.py`)
 - [ ] Talkgroup alias CSV import
 - [ ] Offline RadioID database (local SQLite snapshot)
 - [ ] Trunked DMR (control channel parsing)
@@ -276,7 +277,7 @@ RTL-SDR device 0 (mode-switch)
 2. ~~**udev rules**~~ — ✅ done (2026-06-12): `99-hampi.rules` + serial-string `rtl_device` config
 3. ~~**APRS**~~ — ✅ done (2026-06-12); TX via BTech APRS-K1 cable is the follow-on
 4. ~~**AX.25 packet terminal**~~ — ✅ RX monitor done (2026-06-12); connected-mode + beacon TX blocked on APRS-K1 + radio
-5. **ADS-B flight lookup** — local `aircraft.csv`; no new hardware required
+5. ~~**ADS-B flight lookup**~~ — ✅ done (2026-06-12): local `aircraft.db` (OpenSky snapshot, 516k aircraft)
 6. **Talkgroup aliases + RadioID local DB** — DMR polish
 7. ~~**SSTV image reception**~~ — ✅ done
 8. **Satellite telemetry** — research phase first; hardware path TBD
