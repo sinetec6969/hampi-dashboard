@@ -1,0 +1,11 @@
+# HamPi Dashboard — stable device names
+# Install: sudo cp 99-hampi.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+#
+# Serial devices get fixed /dev names regardless of plug order:
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", SYMLINK+="meshtastic"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", ATTRS{serial}=="591E009758", SYMLINK+="tinygs"
+
+# RTL-SDR symlinks (informational — rtl_tcp/rtl_adsb select by -d index/serial,
+# not /dev path; set unique EEPROM serials and use rtl_device in config.yaml):
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000001", SYMLINK+="rtlsdr0"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000002", SYMLINK+="rtlsdr1"

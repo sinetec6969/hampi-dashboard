@@ -18,7 +18,7 @@ AircraftCb = Callable[[dict], Awaitable[None]]
 class ADSBDecoder:
     def __init__(
         self,
-        device_index: int = 2,
+        device_index: int | str = 2,
         gain: float = -1.0,
         lat_ref: float = 0.0,
         lon_ref: float = 0.0,
@@ -50,7 +50,7 @@ class ADSBDecoder:
         self._active     = True
         self._read_task  = asyncio.create_task(self._read_loop(),  name="adsb-read")
         self._prune_task = asyncio.create_task(self._prune_loop(), name="adsb-prune")
-        logger.info("ADSBDecoder started — device=%d", self.device_index)
+        logger.info("ADSBDecoder started — device=%s", self.device_index)
 
     async def stop(self) -> None:
         self._active = False

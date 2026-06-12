@@ -24,6 +24,7 @@ from typing import Optional, Set
 
 import httpx
 import numpy as np
+import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +33,7 @@ from starlette.websockets import WebSocketState
 
 from adsb import ADSBDecoder
 from airband import AirbandScanner, DEFAULT_CHANNELS
+from aprs import APRSDecoder
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
@@ -51,48 +53,80 @@ LOOKUP_TTL = 3600.0   # cache entries for 1 hour
 # Geocoding cache: "city|state" → (lat, lon) | None — permanent, cities don't move
 _geo_cache: dict[str, tuple[float, float] | None] = {}
 
-INITIAL_FREQ:   int   = int(os.getenv("SDR_FREQ",        "438800000"))
-INITIAL_GAIN:   float = float(os.getenv("SDR_GAIN",      "49.6"))
-SAMPLE_RATE:    int   = int(os.getenv("SDR_SAMPLE_RATE", "2400000"))
-CHUNK_SIZE:     int   = int(os.getenv("SDR_CHUNK_SIZE",  "131072"))
+# config.yaml (repo root) is the primary config; env vars override it.
+_CONFIG_PATH = os.getenv("CONFIG", os.path.join(os.path.dirname(__file__), "..", "config.yaml"))
+try:
+    with open(_CONFIG_PATH) as _f:
+        _CFG: dict = yaml.safe_load(_f) or {}
+    logger.info("Loaded config from %s", _CONFIG_PATH)
+except FileNotFoundError:
+    _CFG = {}
+
+
+def cfg(path: str, default):
+    cur = _CFG
+    for key in path.split("."):
+        if not isinstance(cur, dict) or key not in cur:
+            return default
+        cur = cur[key]
+    return cur
+
+
+def cfg_bool(env: str, path: str, default: int) -> bool:
+    return str(os.getenv(env, cfg(path, default))).lower() in ("1", "true")
+
+
+INITIAL_FREQ:   int   = int(os.getenv("SDR_FREQ",        cfg("sdr.freq", 438800000)))
+INITIAL_GAIN:   float = float(os.getenv("SDR_GAIN",      cfg("sdr.gain", 49.6)))
+SAMPLE_RATE:    int   = int(os.getenv("SDR_SAMPLE_RATE", cfg("sdr.sample_rate", 2400000)))
+CHUNK_SIZE:     int   = int(os.getenv("SDR_CHUNK_SIZE",  cfg("sdr.chunk_size", 131072)))
 FFT_PER_CHUNK:  int   = 4   # waterfall lines emitted per IQ read
 N_FFT:          int   = 1024
-FRONTEND_DIST:  str   = os.getenv("FRONTEND_DIST", "../frontend/dist")
-HISTORY_FILE:   str   = os.getenv("HISTORY_FILE",
-                                   os.path.join(os.path.dirname(__file__), "..", "call_history.json"))
+# rtl_device values may be an index (0) or an EEPROM serial string ("HAMPI0") —
+# rtl_tcp/rtl_adsb resolve both via verbose_device_search. Serials must be
+# non-numeric: a numeric string parses as an index first.
+SDR_RTL_DEV: int | str = os.getenv("SDR_RTL_DEV", cfg("sdr.rtl_device", 0))
+SERVER_PORT:    int   = int(os.getenv("PORT", cfg("server.port", 8000)))
+FRONTEND_DIST:  str   = os.getenv("FRONTEND_DIST", cfg("server.frontend_dist", "../frontend/dist"))
+HISTORY_FILE:   str   = os.getenv("HISTORY_FILE", cfg("server.history_file",
+                                   os.path.join(os.path.dirname(__file__), "..", "call_history.json")))
 MAX_HISTORY:    int   = 200
 
 # Meshtastic configuration
-MESH_ENABLE: bool          = os.getenv("MESH_ENABLE", "1") == "1"
-MESH_PORT:   Optional[str] = os.getenv("MESH_PORT")   # None = auto-detect
+MESH_ENABLE: bool          = cfg_bool("MESH_ENABLE", "meshtastic.enable", 1)
+MESH_PORT:   Optional[str] = os.getenv("MESH_PORT", cfg("meshtastic.port", None))  # None = auto-detect
 
 # Airband configuration
-AIRBAND_ENABLE:  bool  = os.getenv("AIRBAND_ENABLE", "1") == "1"
-AIRBAND_RTL_DEV: int   = int(os.getenv("AIRBAND_RTL_DEV",  "1"))
-AIRBAND_RTL_PORT:int   = int(os.getenv("AIRBAND_RTL_PORT", "1235"))
-AIRBAND_GAIN:    float = float(os.getenv("AIRBAND_GAIN",   "40.0"))
-AIRBAND_SQUELCH: float = float(os.getenv("AIRBAND_SQUELCH","0.01"))
-AIRBAND_DWELL:   int   = int(os.getenv("AIRBAND_DWELL_MS", "2000"))
+AIRBAND_ENABLE:  bool  = cfg_bool("AIRBAND_ENABLE", "airband.enable", 1)
+AIRBAND_RTL_DEV: int | str = os.getenv("AIRBAND_RTL_DEV", cfg("airband.rtl_device", 1))
+AIRBAND_RTL_PORT:int   = int(os.getenv("AIRBAND_RTL_PORT", cfg("airband.rtl_port", 1235)))
+AIRBAND_GAIN:    float = float(os.getenv("AIRBAND_GAIN",   cfg("airband.gain", 40.0)))
+AIRBAND_SQUELCH: float = float(os.getenv("AIRBAND_SQUELCH",cfg("airband.squelch", 0.01)))
+AIRBAND_DWELL:   int   = int(os.getenv("AIRBAND_DWELL_MS", cfg("airband.dwell_ms", 2000)))
+AIRBAND_CHANNELS: list[dict] = cfg("airband.frequencies", DEFAULT_CHANNELS)
 
 # ADS-B configuration
-ADSB_ENABLE:  bool  = os.getenv("ADSB_ENABLE", "0") == "1"
-ADSB_RTL_DEV: int   = int(os.getenv("ADSB_RTL_DEV", "2"))
-ADSB_GAIN:    float = float(os.getenv("ADSB_GAIN",   "-1"))   # negative = auto
-ADSB_LAT:     float = float(os.getenv("ADSB_LAT",    "0.0"))  # reference for CPR fallback
-ADSB_LON:     float = float(os.getenv("ADSB_LON",    "0.0"))
+ADSB_ENABLE:  bool  = cfg_bool("ADSB_ENABLE", "adsb.enable", 0)
+ADSB_RTL_DEV: int | str = os.getenv("ADSB_RTL_DEV", cfg("adsb.rtl_device", 2))
+ADSB_GAIN:    float = float(os.getenv("ADSB_GAIN",   cfg("adsb.gain", -1)))    # negative = auto
+ADSB_LAT:     float = float(os.getenv("ADSB_LAT",    cfg("adsb.lat_ref", 0.0)))  # reference for CPR fallback
+ADSB_LON:     float = float(os.getenv("ADSB_LON",    cfg("adsb.lon_ref", 0.0)))
 
 # SSTV configuration
-SSTV_FREQ:      int   = int(os.getenv("SSTV_FREQ",   "145800000"))
-SSTV_GAIN:      float = float(os.getenv("SSTV_GAIN", "40.0"))
-SSTV_IMAGE_DIR: str   = os.getenv(
-    "SSTV_IMAGE_DIR",
+SSTV_FREQ:      int   = int(os.getenv("SSTV_FREQ",   cfg("sstv.freq", 145800000)))
+SSTV_GAIN:      float = float(os.getenv("SSTV_GAIN", cfg("sstv.gain", 40.0)))
+SSTV_IMAGE_DIR: str   = os.getenv("SSTV_IMAGE_DIR", cfg("sstv.image_dir",
     os.path.join(os.path.dirname(__file__), "..", "sstv_images"),
-)
+))
+
+# APRS configuration
+APRS_FREQ: int   = int(os.getenv("APRS_FREQ",   cfg("aprs.freq", 144390000)))
+APRS_GAIN: float = float(os.getenv("APRS_GAIN", cfg("aprs.gain", 49.6)))
 
 # Satellite / TinyGS configuration
-SAT_ENABLE:  bool = os.getenv("SAT_ENABLE", "1") == "1"
-MQTT_HOST:   str  = os.getenv("MQTT_HOST",  "localhost")
-MQTT_PORT:   int  = int(os.getenv("MQTT_PORT", "1883"))
+SAT_ENABLE:  bool = cfg_bool("SAT_ENABLE", "satellite.enable", 1)
+MQTT_HOST:   str  = os.getenv("MQTT_HOST",  cfg("satellite.mqtt_host", "localhost"))
+MQTT_PORT:   int  = int(os.getenv("MQTT_PORT", cfg("satellite.mqtt_port", 1883)))
 
 # ---------------------------------------------------------------------------
 # Shared state
@@ -114,8 +148,10 @@ meshtastic_clients: Set[WebSocket] = set()
 adsb_clients:       Set[WebSocket] = set()
 sstv_clients:       Set[WebSocket] = set()
 satellite_clients:  Set[WebSocket] = set()
+aprs_clients:       Set[WebSocket] = set()
 
 _mode_sstv: Optional[SSTVDecoder] = None
+_mode_aprs: Optional[APRSDecoder] = None
 satellite_monitor: Optional[SatelliteMonitor] = None
 
 # Last-known airband status — returned by /api/airband/status
@@ -127,7 +163,7 @@ airband_status: dict = {
     "scanner_on":   True,
     "squelch":      AIRBAND_SQUELCH,
     "dwell_ms":     AIRBAND_DWELL,
-    "channels":     DEFAULT_CHANNELS,
+    "channels":     AIRBAND_CHANNELS,
 }
 
 call_history: list[dict] = []
@@ -240,6 +276,35 @@ async def on_satellite_packet(packet: dict) -> None:
 
 async def on_satellite_status(status: dict) -> None:
     await broadcast_json(satellite_clients, status)
+
+
+async def on_aprs_packet(msg: dict) -> None:
+    await broadcast_json(aprs_clients, msg)
+
+
+async def aprs_loop() -> None:
+    loop = asyncio.get_running_loop()
+    logger.info("APRS loop started — freq=%d Hz", APRS_FREQ)
+    try:
+        while True:
+            try:
+                iq  = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
+                pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, APRS_FREQ)
+                if _mode_aprs:
+                    await _mode_aprs.write_audio(pcm)
+                await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("APRS loop error — retrying in 3 s")
+                await asyncio.sleep(3)
+                try:
+                    sdr.stop()
+                    await loop.run_in_executor(None, sdr.start)
+                except Exception:
+                    logger.exception("APRS SDR reconnect failed")
+    except asyncio.CancelledError:
+        logger.info("APRS loop cancelled")
 
 
 async def sstv_loop() -> None:
@@ -371,6 +436,7 @@ async def lifespan(app: FastAPI):
         freq=INITIAL_FREQ,
         sample_rate=SAMPLE_RATE,
         gain=INITIAL_GAIN,
+        device_index=SDR_RTL_DEV,
     )
 
     # Initialise DMR decoder
@@ -391,7 +457,7 @@ async def lifespan(app: FastAPI):
     if AIRBAND_ENABLE:
         try:
             airband = AirbandScanner(
-                channels=DEFAULT_CHANNELS,
+                channels=AIRBAND_CHANNELS,
                 squelch=AIRBAND_SQUELCH,
                 dwell_ms=AIRBAND_DWELL,
                 gain=AIRBAND_GAIN,
@@ -402,8 +468,8 @@ async def lifespan(app: FastAPI):
             )
             await airband.start()
             airband_status["enabled"]  = True
-            airband_status["channels"] = DEFAULT_CHANNELS
-            logger.info("AirbandScanner started on device=%d port=%d",
+            airband_status["channels"] = AIRBAND_CHANNELS
+            logger.info("AirbandScanner started on device=%s port=%d",
                         AIRBAND_RTL_DEV, AIRBAND_RTL_PORT)
         except Exception:
             logger.warning("AirbandScanner failed to start — airband disabled",
@@ -421,7 +487,7 @@ async def lifespan(app: FastAPI):
                 aircraft_callback=on_adsb_aircraft,
             )
             await adsb_decoder.start()
-            logger.info("ADSBDecoder started on device=%d", ADSB_RTL_DEV)
+            logger.info("ADSBDecoder started on device=%s", ADSB_RTL_DEV)
         except Exception:
             logger.warning("ADSBDecoder failed to start — ADS-B disabled", exc_info=True)
             adsb_decoder = None
@@ -469,6 +535,8 @@ async def lifespan(app: FastAPI):
         await _mode_adsb.stop()
     if _mode_sstv is not None:
         await _mode_sstv.stop()
+    if _mode_aprs is not None:
+        await _mode_aprs.stop()
     if airband is not None:
         await airband.stop()
     if adsb_decoder is not None:
@@ -567,7 +635,7 @@ async def api_sysinfo():
         "hostname":     socket.gethostname(),
         "local_ip":     None,
         "tailscale_ip": None,
-        "version":      "0.2.2_rustylives",
+        "version":      "0.3.0_p4ck3t5",
     }
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -630,6 +698,10 @@ def _cur_sstv() -> Optional[SSTVDecoder]:
     return _mode_sstv if active_sdr_mode == "sstv" else None
 
 
+def _cur_aprs() -> Optional[APRSDecoder]:
+    return _mode_aprs if active_sdr_mode == "aprs" else None
+
+
 @app.get("/api/sdr/mode")
 async def api_get_sdr_mode():
     return {"mode": active_sdr_mode}
@@ -637,9 +709,9 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv
+    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs
 
-    VALID = ("dmr", "airband", "adsb", "sstv")
+    VALID = ("dmr", "airband", "adsb", "sstv", "aprs")
     if mode not in VALID:
         raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
     if mode == active_sdr_mode:
@@ -677,17 +749,28 @@ async def api_set_sdr_mode(mode: str):
             _mode_sstv = None
         await loop.run_in_executor(None, sdr.stop)
 
+    elif active_sdr_mode == "aprs":
+        if sdr_task is not None and not sdr_task.done():
+            sdr_task.cancel()
+            await asyncio.gather(sdr_task, return_exceptions=True)
+            sdr_task = None
+        if _mode_aprs is not None:
+            await _mode_aprs.stop()
+            _mode_aprs = None
+        await loop.run_in_executor(None, sdr.stop)
+
     # ── Start requested mode ─────────────────────────────────────
     try:
         if mode == "dmr":
             sdr.freq = INITIAL_FREQ
+            sdr.gain = INITIAL_GAIN
             await loop.run_in_executor(None, sdr.start)
             await decoder.start()
             sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
 
         elif mode == "airband":
             _mode_airband = AirbandScanner(
-                channels=DEFAULT_CHANNELS,
+                channels=AIRBAND_CHANNELS,
                 squelch=AIRBAND_SQUELCH,
                 dwell_ms=AIRBAND_DWELL,
                 gain=AIRBAND_GAIN,
@@ -722,13 +805,23 @@ async def api_set_sdr_mode(mode: str):
             await _mode_sstv.start()
             sdr_task = asyncio.create_task(sstv_loop(), name="sstv-loop")
 
+        elif mode == "aprs":
+            sdr.freq = APRS_FREQ
+            sdr.gain = APRS_GAIN
+            await loop.run_in_executor(None, sdr.start)
+            _mode_aprs = APRSDecoder(packet_callback=on_aprs_packet)
+            await _mode_aprs.start()
+            sdr_task = asyncio.create_task(aprs_loop(), name="aprs-loop")
+
     except Exception as exc:
         logger.error("Mode switch to %r failed: %s — restoring DMR", mode, exc)
         _mode_airband = None
         _mode_adsb    = None
         _mode_sstv    = None
+        _mode_aprs    = None
         try:
             sdr.freq = INITIAL_FREQ
+            sdr.gain = INITIAL_GAIN
             await loop.run_in_executor(None, sdr.start)
             await decoder.start()
             sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
@@ -1057,6 +1150,53 @@ async def api_sstv_image(filename: str):
 
 
 # ---------------------------------------------------------------------------
+# APRS WebSocket + REST endpoints
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/aprs")
+async def ws_aprs(websocket: WebSocket):
+    await websocket.accept()
+    aprs_clients.add(websocket)
+    logger.info("APRS client connected — total=%d", len(aprs_clients))
+    try:
+        cur = _cur_aprs()
+        if cur:
+            await websocket.send_text(json.dumps(cur.status_dict()))
+    except Exception:
+        pass
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in APRS WebSocket handler")
+    finally:
+        aprs_clients.discard(websocket)
+        logger.info("APRS client disconnected — total=%d", len(aprs_clients))
+
+
+@app.get("/api/aprs/status")
+async def api_aprs_status():
+    cur = _cur_aprs()
+    if cur:
+        return cur.status_dict()
+    return {"type": "status", "running": False, "frames": 0, "parse_errors": 0, "stations": 0}
+
+
+@app.get("/api/aprs/stations")
+async def api_aprs_stations():
+    cur = _cur_aprs()
+    return list(cur.stations.values()) if cur else []
+
+
+@app.get("/api/aprs/packets")
+async def api_aprs_packets():
+    cur = _cur_aprs()
+    return list(cur.packets) if cur else []
+
+
+# ---------------------------------------------------------------------------
 # Satellite endpoints
 # ---------------------------------------------------------------------------
 
@@ -1111,4 +1251,4 @@ else:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=SERVER_PORT, reload=False)

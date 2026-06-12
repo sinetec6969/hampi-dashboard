@@ -1,0 +1,58 @@
+# HamPi Dashboard configuration
+# Copy to config.yaml and edit. Env vars (old names) still override these.
+# All keys optional — omitted keys use the defaults shown.
+
+server:
+  port: 8000
+  # frontend_dist: ../frontend/dist
+  # history_file: ../call_history.json
+
+# rtl_device keys accept an index (0) or an EEPROM serial string ("HAMPI0").
+# Serials survive replug/reboot reordering — set with: rtl_eeprom -d 0 -s HAMPI0
+# Serials must be NON-numeric: rtl_tcp parses numeric -d values as an index.
+
+sdr:                      # device 0 — mode switcher (DMR default)
+  freq: 438800000
+  gain: 49.6
+  # rtl_device: 0
+  # sample_rate: 2400000
+  # chunk_size: 131072
+
+airband:
+  enable: true
+  rtl_device: 1
+  rtl_port: 1235
+  gain: 40.0
+  squelch: 0.01           # tune for your noise floor
+  dwell_ms: 2000
+  frequencies:
+    - { freq: 121500000, label: "Guard" }
+    - { freq: 123450000, label: "CTAF" }
+    - { freq: 126200000, label: "Center" }
+    - { freq: 132850000, label: "Departure" }
+
+adsb:
+  enable: false           # true = dedicated decoder on boot (needs own dongle)
+  rtl_device: 2
+  gain: -1                # negative = auto
+  lat_ref: 0.0            # reference position — enables faster CPR decode
+  lon_ref: 0.0
+
+sstv:
+  freq: 145800000         # 145.800 MHz ISS/2m
+  gain: 40.0
+  # image_dir: ../sstv_images
+
+aprs:
+  freq: 144390000         # North America APRS
+  gain: 49.6
+
+meshtastic:
+  enable: true
+  # port:                 # serial port — omit for auto-detect
+  # port: /dev/meshtastic # stable name once 99-hampi.rules is installed
+
+satellite:
+  enable: true
+  mqtt_host: localhost
+  mqtt_port: 1883

@@ -61,8 +61,8 @@ const MODES: ModeCard[] = [
     icon: '📻',
     title: 'APRS',
     subtitle: '144.390 MHz Packet',
-    description: 'Decode Automatic Packet Reporting System traffic. Station map with APRS symbols, packet log, and weather data.',
-    status: 'coming-soon',
+    description: 'Decode Automatic Packet Reporting System traffic via direwolf. Station map, packet log, and weather data. Switch SDR mode to share device 0.',
+    status: 'live',
     color: '#ff8844',
     hardware: 'RTL-SDR + direwolf',
   },
@@ -89,7 +89,7 @@ const MODES: ModeCard[] = [
 
 export default function Home() {
   const [info, setInfo] = useState<SysInfo | null>(null)
-  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | 'sstv' | null>(null)
+  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | null>(null)
   const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
 
@@ -98,7 +98,7 @@ export default function Home() {
     fetch('/api/sdr/mode').then(r => r.json()).then(d => setSdrMode(d.mode)).catch(() => {})
   }, [])
 
-  async function switchMode(mode: 'dmr' | 'airband' | 'adsb' | 'sstv') {
+  async function switchMode(mode: 'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs') {
     if (mode === sdrMode || switching) return
     setSwitching(true)
     try {
@@ -171,6 +171,13 @@ export default function Home() {
               disabled={switching}
             >
               SSTV
+            </button>
+            <button
+              className={'sdr-mode-btn' + (sdrMode === 'aprs' ? ' sdr-mode-active' : '')}
+              onClick={() => switchMode('aprs')}
+              disabled={switching}
+            >
+              APRS
             </button>
           </div>
           {switching && <span className="sdr-mode-switching">switching…</span>}

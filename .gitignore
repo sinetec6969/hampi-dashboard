@@ -16,3 +16,4 @@ frontend/dist/
 # Runtime data
 call_history.json
 recordings/
+config.yaml

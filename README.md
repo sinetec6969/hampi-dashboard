@@ -268,6 +268,14 @@ Check `groups $USER` includes `dialout`. Run `ls /dev/ttyUSB*`. If ModemManager 
 
 ## Version History
 
+### 0.3.0_p4ck3t5 — 2026-06-12
+- **APRS live** — `aprs.py`: direwolf subprocess fed 48 kHz FM audio over stdin, frames parsed with aprslib (position, weather, messages, objects). APRS added to SDR mode switcher (144.390 MHz). `APRSPage.tsx`: station map, detail panel, live packet log. TX path planned via BTech APRS-K1 audio cable (direwolf VOX). Requires `direwolf` ≥1.7 (`sudo apt install direwolf`).
+- **config.yaml** — primary configuration at repo root (see `config.yaml.example`); env vars still override. Editable airband channel list.
+- **systemd service** — `hampi-dashboard.service`: auto-start on boot, cgroup kill cleans up rtl_tcp/dsd-fme/direwolf children.
+- **udev rules** — `99-hampi.rules`: stable `/dev/meshtastic` + `/dev/tinygs` names. `rtl_device` config keys accept EEPROM serial strings (non-numeric) for stable multi-dongle selection.
+- **DMR fix** — call end-time now uses last voice frame timestamp; TLC terminator closes calls promptly.
+- **Frontend fix** — WebSocket reconnect timers cleaned up on unmount (no more zombie reconnects across page navigation).
+
 ### 0.2.2_rustylives — 2026-06-08
 - **Satellite telemetry live** — TinyGS-firmware LilyGO T3 V1.6.1 LoRa32 board connects to local Mosquitto over TLS (port 8883, `setInsecure()` cert bypass against self-signed cert) instead of mqtt.tinygs.com. `backend/satellite.py` subscribes `tinygs/#`, parses `tele/ping`, `tele/rx`, and `stat/status` payloads. `SatellitePage.tsx` shows live station telemetry (WiFi RSSI, free mem, radio init status, instantaneous LoRa RSSI) and a packet feed with hex/ASCII dump. Vbat row hidden when USB-powered.
 - **Meshtastic crash fix** — `meshtastic_handler.py` catches `SystemExit` from the library's port auto-detect when multiple serial devices are present.

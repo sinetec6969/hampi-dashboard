@@ -2,8 +2,8 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.2.2_rustylives (2026-06-08)  
-> **Status:** Pre-beta. DMR (metadata), ADS-B, Airband AM, Meshtastic, SSTV, and Satellite telemetry (via TinyGS hardware → local MQTT) are all live. Mobile-responsive. Single RTL-SDR dongle covers all SDR modes via the mode switcher; second dongle runs Airband dedicated. DMR audio decode was removed — AMBE via dsd-fme had persistent sample-rate issues on Pi 4; DMR page is now metadata-only (talkgroup, caller, call history, map).
+> **Current version:** 0.3.0_p4ck3t5 (2026-06-12)  
+> **Status:** Pre-beta. DMR (metadata), ADS-B, Airband AM, Meshtastic, SSTV, APRS, and Satellite telemetry (via TinyGS hardware → local MQTT) are all live. config.yaml + systemd + udev rules in place. Mobile-responsive. Single RTL-SDR dongle covers all SDR modes via the mode switcher; second dongle runs Airband dedicated. DMR audio decode was removed — AMBE via dsd-fme had persistent sample-rate issues on Pi 4; DMR page is now metadata-only (talkgroup, caller, call history, map).
 
 ---
 
@@ -118,7 +118,6 @@ AIRBAND_DWELL_MS=2000     # ms per channel when scanning
 ```
 
 **Known limitations:**
-- Channel list is hardcoded — `config.yaml` support planned
 - No ATIS text decode
 
 ---
@@ -156,23 +155,28 @@ MESH_PORT=             # serial port — leave blank for auto-detect
 
 ## Roadmap — Coming Next
 
-### APRS Station Monitoring
+### ✅ APRS Station Monitoring
 
 Decode APRS traffic on 144.390 MHz via `direwolf` TNC.
 
-**Backend:**
-- `direwolf` subprocess with AGWPE or stdout frame output
-- `aprs.py` (APRSDecoder): parse position, weather, messages, objects, telemetry
-- `/ws/aprs` WebSocket — live decoded packets
-- `GET /api/aprs/stations` REST
+**Implemented (2026-06-12):**
+- `aprs.py` — `APRSDecoder`: `direwolf` subprocess (`-q hd -n 1 -r 48000 -b 16 -`, audio on stdin from `fm_demodulate()`); stdout frame lines parsed with `aprslib` (position, weather, messages, objects, telemetry); station registry + 200-packet rolling log
+- `main.py` — `"aprs"` added to SDR mode switcher (device 0 retuned to 144.390 MHz FM); `aprs_loop()`; `/ws/aprs`; `GET /api/aprs/status`, `/api/aprs/stations`, `/api/aprs/packets`
+- `APRSPage.tsx` — Leaflet map (emoji symbol markers), station detail panel (position, course/speed, path, weather, comment), station list + live packet log
 
-**Frontend:**
-- `APRSPage.tsx` — Leaflet map with standard APRS symbol icons
-- Click station: callsign, last heard, comment, path, packet type
-- Packet log: timestamp, callsign, type, decoded summary
-- Weather packet display (temp, wind, rain)
+**Configuration (config.yaml):**
+```yaml
+aprs:
+  freq: 144390000
+  gain: 49.6
+```
 
-**Requires:** dedicated dongle (device 3) or time-share via mode switcher
+**Requires:** `direwolf` in PATH (`sudo apt install direwolf`); time-share device 0 via mode switcher or dedicated dongle later
+
+**Known limitations / future:**
+- RX only. **TX path planned via BTech APRS-K1 audio cable** — HT speaker/mic jack to a USB soundcard on the Pi; direwolf keys the radio via VOX, enabling beacon / digipeat / igate transmit with no TNC hardware. Would also serve as an alternative RX audio source (HT discriminator audio instead of RTL-SDR).
+- Emoji symbol markers, not the standard two-table APRS symbol sprite set
+- No igate/digipeater function (intentional until TX path exists)
 
 ---
 
@@ -265,9 +269,9 @@ RTL-SDR device 0 (mode-switch)
 
 ### Miscellaneous Backlog
 
-- [ ] config.yaml — replace env vars; editable channel/talkgroup lists
-- [ ] Systemd service — auto-start and restart on boot
-- [ ] udev rules — stable USB device aliases across reboots (required for reliable multi-dongle)
+- [x] config.yaml — env vars still override; editable airband channel list (talkgroup aliases still pending, see item 6)
+- [x] Systemd service — `hampi-dashboard.service` in repo root; auto-start and restart on boot
+- [x] udev rules — `99-hampi.rules` (meshtastic/tinygs tty symlinks); rtl_device config keys accept EEPROM serial strings for stable dongle selection
 - [ ] ADS-B flight lookup — local `aircraft.csv` for airline/registration data
 - [ ] Talkgroup alias CSV import
 - [ ] Offline RadioID database (local SQLite snapshot)
@@ -279,9 +283,9 @@ RTL-SDR device 0 (mode-switch)
 
 ## Priority Order (updated 2026-06-06)
 
-1. **config.yaml + systemd** — quality of life; stops manual env-var sessions, makes channel lists editable, enables auto-start
-2. **udev rules** — required for stable multi-dongle operation
-3. **APRS** — `direwolf` handles decoding; can time-share device 0 via mode switcher
+1. ~~**config.yaml + systemd**~~ — ✅ done (2026-06-12): `config.yaml.example` + `hampi-dashboard.service`
+2. ~~**udev rules**~~ — ✅ done (2026-06-12): `99-hampi.rules` + serial-string `rtl_device` config
+3. ~~**APRS**~~ — ✅ done (2026-06-12); TX via BTech APRS-K1 cable is the follow-on
 4. **AX.25 packet terminal** — shares `direwolf` with APRS; low marginal effort after APRS lands
 5. **ADS-B flight lookup** — local `aircraft.csv`; no new hardware required
 6. **Talkgroup aliases + RadioID local DB** — DMR polish
@@ -307,24 +311,29 @@ Device 0 (mode-switchable):
   Airband → rtl_tcp :1234 → SDREngine → AirbandScanner
   ADS-B   → rtl_adsb -d 0 → ADSBDecoder (pyModeS 3.3.0)
   SSTV    → rtl_tcp :1234 → SDREngine → SSTVDecoder (145.800 MHz FM)
+  APRS    → rtl_tcp :1234 → SDREngine → APRSDecoder (direwolf, 144.390 MHz FM)
 
 Device 1+ (dedicated, independent):
   Airband → rtl_tcp :1235 → AirbandScanner
   ADS-B   → rtl_adsb -d 2 → ADSBDecoder
 ```
 
-### udev Rules (multi-dongle)
+### Stable Device Names (multi-dongle / multi-serial)
+`99-hampi.rules` in repo root — install with:
 ```bash
-# /etc/udev/rules.d/99-rtlsdr.rules
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000001", SYMLINK+="rtlsdr0"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="00000002", SYMLINK+="rtlsdr1"
+sudo cp 99-hampi.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
 ```
+Gives `/dev/meshtastic` (Heltec V3) and `/dev/tinygs` (LilyGO T3) regardless of plug order.
 
-Get serial: `rtl_eeprom -d 0` · Set serial: `rtl_eeprom -d 0 -s 00000001`
+**RTL dongles:** symlinks don't help — `rtl_tcp`/`rtl_adsb` select via `-d`, not /dev paths. Instead, every `rtl_device` config key accepts an EEPROM serial string, which `verbose_device_search` resolves to the right dongle at startup.
 
-### Config File (planned)
+Get serial: `rtl_eeprom -d 0` · Set serial: `rtl_eeprom -d 0 -s HAMPI0` (replug after).
+Serials must be **non-numeric** — numeric `-d` values parse as a device index first.
+
+### Config File
+Live since 2026-06-12 — see `config.yaml.example` for the full key list. Env vars override yaml; missing file falls back to defaults.
 ```yaml
-# config.yaml (planned)
+# config.yaml
 sdr:
   primary_freq: 438800000
   gain: 49.6
@@ -340,10 +349,7 @@ adsb:
   lat_ref: 30.2
   lon_ref: -97.7
 
-talkgroups:
-  91: "Worldwide"
-  93: "North America"
-  3116: "Texas"
+# talkgroups: section planned — lands with priority item 6 (alias import)
 ```
 
 ---
@@ -360,3 +366,5 @@ talkgroups:
 ✅ Mobile-responsive layout — 0.2.1_piperrrrr  
 ✅ SSTV image decoder (Scottie S1/S2, Martin M1/M2, Robot 36) — 2026-06-06  
 ✅ Satellite telemetry (TinyGS hardware → local MQTT) — 0.2.2_rustylives  
+✅ config.yaml + systemd service + udev rules — 0.3.0_p4ck3t5  
+✅ APRS station monitoring (direwolf + aprslib) — 0.3.0_p4ck3t5  

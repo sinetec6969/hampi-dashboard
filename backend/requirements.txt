@@ -8,3 +8,5 @@ meshtastic
 pyModeS
 paho-mqtt
 pillow
+pyyaml
+aprslib

@@ -45,7 +45,7 @@ class AirbandScanner:
         dwell_ms: int = 2000,
         gain: float = 40.0,
         sample_rate: int = 2_400_000,
-        rtl_device: int = 1,
+        rtl_device: int | str = 1,
         rtl_port: int = 1235,
         audio_callback: Optional[AudioCb] = None,
         status_callback: Optional[StatusCb] = None,
@@ -100,7 +100,7 @@ class AirbandScanner:
         await loop.run_in_executor(None, self._sdr.start)
         self._active = True
         self._task   = asyncio.create_task(self._scan_loop(), name="airband-scan")
-        logger.info("AirbandScanner started — device=%d port=%d",
+        logger.info("AirbandScanner started — device=%s port=%d",
                     self._sdr.device_index, self._sdr.port)
 
     async def stop(self) -> None:

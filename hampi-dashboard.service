@@ -1,0 +1,15 @@
+[Unit]
+Description=HamPi SDR Dashboard
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+User=j
+WorkingDirectory=/home/j/hampi-dashboard/backend
+ExecStart=/home/j/hampi-dashboard/backend/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+# control-group kill takes rtl_tcp/dsd-fme children down with it
+
+[Install]
+WantedBy=multi-user.target

@@ -37,7 +37,7 @@ class SDREngine:
         gain: float = 49.6,
         rtl_tcp_host: str = "127.0.0.1",
         rtl_tcp_port: int = 1234,
-        device_index: int = 0,
+        device_index: int | str = 0,
     ):
         self.freq = freq
         self.sample_rate = sample_rate
