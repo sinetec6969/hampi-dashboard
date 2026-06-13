@@ -42,6 +42,7 @@ export default function SSTVPage() {
   const [status, setStatus]     = useState<SSTVStatus>(DEFAULT_STATUS)
   const [gallery, setGallery]   = useState<GalleryItem[]>([])
   const [lightbox, setLightbox] = useState<string | null>(null)
+  const [tunedHz, setTunedHz]   = useState(145800000)
   const canvasRef               = useRef<HTMLCanvasElement>(null)
   const imgDataRef              = useRef<ImageData | null>(null)
   const wsRef                   = useRef<WebSocket | null>(null)
@@ -132,7 +133,11 @@ export default function SSTVPage() {
     initCanvas(320, 256)
     fetchGallery()
     const ws = connect()
-    return () => { ws.close() }
+    const poll = () => fetch('/api/status').then(r => r.json())
+      .then(d => { if (d.freq) setTunedHz(d.freq) }).catch(() => {})
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => { ws.close(); clearInterval(id) }
   }, [connect, fetchGallery, initCanvas])
 
   // ── Render ────────────────────────────────────────────────────────
@@ -148,6 +153,9 @@ export default function SSTVPage() {
       {/* Header */}
       <div className="sstv-header">
         <span className="sstv-title">📺 SSTV</span>
+        <span style={{ color: '#ff8800', fontFamily: 'monospace', fontSize: 13 }}>
+          {(tunedHz / 1e6).toFixed(3)} MHz
+        </span>
         <div className="sstv-header-center">
           <span className="sstv-state-dot" style={{ background: stateColor(status.state) }} />
           <span className="sstv-state-label" style={{ color: stateColor(status.state) }}>
@@ -189,12 +197,12 @@ export default function SSTVPage() {
             <div className="sstv-hint">
               Switch SDR mode to <strong>SSTV</strong> from the home page.<br />
               Default frequency: 145.800 MHz (ISS SSTV / 2m FM).<br />
-              Override with <code>SSTV_FREQ=&lt;Hz&gt;</code> env var.
+              Pick a satellite above to track it (Doppler auto-tune).
             </div>
           )}
           {status.state === 'idle' && (
             <div className="sstv-hint">
-              Listening on {(145800000 / 1e6).toFixed(3)} MHz FM.<br />
+              Listening on {(tunedHz / 1e6).toFixed(3)} MHz FM.<br />
               Waiting for SSTV leader tone (1900 Hz).
             </div>
           )}

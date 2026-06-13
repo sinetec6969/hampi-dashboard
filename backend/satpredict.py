@@ -27,11 +27,12 @@ DEFAULT_SSTV_SATS = [
     {"norad": 25544, "name": "ISS", "freq": 145_800_000, "mode": "FM · PD120",
      "desc": "International Space Station — ARISS SSTV events on 145.800 FM "
              "(usually PD120). Scheduled events only; check ariss-sstv.blogspot.com."},
-    {"norad": 57172, "name": "UmKA-1 (RS40S)", "freq": 437_625_000, "mode": "FM · Robot36",
-     "desc": "Russian educational CubeSat — periodic SSTV (Robot 36) on 437.625 FM."},
-    {"norad": 59112, "name": "SONATE-2", "freq": 437_025_000, "mode": "FM · SSTV",
-     "desc": "Würzburg tech-demo CubeSat — onboard camera / AI imagery downlinked "
-             "as SSTV on 70 cm."},
+    {"norad": 57172, "name": "UmKA-1 (RS40S)", "freq": 437_625_000, "mode": "FM · SSTV",
+     "desc": "Russian educational CubeSat — telescope imagery via SSTV on 437.625 FM "
+             "(70 cm). Also CW + GMSK telemetry on the same downlink."},
+    {"norad": 59112, "name": "SONATE-2", "freq": 145_880_000, "mode": "FM · Martin M1",
+     "desc": "Würzburg AI tech-demo CubeSat — onboard-camera imagery as SSTV "
+             "(Martin M1) on 145.880 FM (2 m). 437.025 is its GMSK telemetry, not SSTV."},
 ]
 
 
