@@ -1,5 +1,9 @@
 # HamPi Dashboard — Roadmap
 
+> **This roadmap is complete** (beta 0.9-b3t4, 2026-06-12). Future plans — TX via
+> Digirig Mobile, APRS beacon/digipeat, AX.25 connected mode, Winlink, SSTV TX,
+> plus the carried-over backlog — live in **[ROADMAP-NEXT.md](ROADMAP-NEXT.md)**.
+
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
 > **Current version:** 0.9-b3t4 (2026-06-12)  
