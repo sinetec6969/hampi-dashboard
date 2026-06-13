@@ -67,6 +67,16 @@ const MODES: ModeCard[] = [
     hardware: 'RTL-SDR + direwolf',
   },
   {
+    path: '/ax25',
+    icon: '📟',
+    title: 'AX.25 Terminal',
+    subtitle: 'Packet Radio / KISS',
+    description: 'Raw AX.25 frame monitor over the shared APRS direwolf TNC. Terminal console, waterfall with click-to-tune, digipeater paths. RX only until TX hardware lands.',
+    status: 'live',
+    color: '#33ff66',
+    hardware: 'direwolf KISS :8001',
+  },
+  {
     path: '/sstv',
     icon: '📺',
     title: 'SSTV',
