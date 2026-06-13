@@ -29,16 +29,30 @@ useful as a second radio's RX tap or a glovebox spare.
 
 ---
 
-## Phase A — TX Foundation (Digirig bring-up)
+## Phase A — TX Foundation (Digirig bring-up)  🚧 UNFINISHED
 
-Everything downstream depends on this.
+Everything downstream depends on this. Software path is built and a valid APRS
+beacon transmitted (KR4BPW, 144.390, 2026-06-13), but **RF is not yet
+confirmed** — the loopback (RTL-SDR self-RX) decoded nothing, and we haven't
+verified the BF-F8HP actually keys. Phase A is **not done** until someone at
+the radio confirms the TX LED lights on a burst, then deviation is set by ear.
 
-- [ ] udev rule for Digirig (CP2102 serial → `/dev/digirig`, sound card by id) — extend `99-hampi.rules`
-- [ ] `radio.py` (`RadioInterface`): owns the Digirig — ALSA playback/capture device discovery, TX audio out, RTS PTT keying, busy-channel lockout (carrier detect before key)
-- [ ] direwolf TX config: second channel or dedicated instance with `ADEVICE plughw:digirig`, `PTT /dev/digirig RTS`
-- [ ] TX audio calibration page — level slider + test tone + deviation check (DigiPi's mixer UI, done our way)
-- [ ] `station:` config section — callsign, SSID, grid/lat-lon, comment (legal ID for every TX mode)
-- [ ] **Safety rail:** global `tx_enable: false` default in config.yaml; every TX endpoint refuses without it + callsign set
+- [x] udev rule for Digirig (CP2102N serial `f46a18…` → `/dev/digirig`) — in `99-hampi.rules` (install + reload pending)
+- [x] `radio.py` (`RadioInterface`): RTS PTT via held-open serial (no key on open), ALSA tone-out for calibration
+- [x] TX calibration page — `RadioPage`: status, PTT test, 1 kHz tone, safety banner (level set via `alsamixer` for now)
+- [x] `station:` config section — callsign, SSID, lat/lon, comment
+- [x] **Safety rail:** `radio.tx_enable: false` default; every TX call refuses without tx_enable + callsign; Digirig serial not even opened until enabled (no startup key blip)
+- [~] one-shot direwolf TX proven from a standalone conf (`ADEVICE null plughw:CARD=Device`, `PTT /dev/ttyUSB1 RTS`) — sent a valid APRS Status Report. Not yet folded into the service (deferred to Phase B as a proper APRSTX class).
+- [ ] busy-channel lockout (carrier detect before key) — deferred to Phase B
+- [ ] **BLOCKER — confirm the BF-F8HP actually keys on a burst (TX LED).** Disambiguates PTT-keying vs RX-side before any further TX work.
+- [ ] set TX deviation by ear (Digirig `Speaker` mixer, currently 38%/−23 dB) once keying is confirmed
+- [ ] prove the loopback: dashboard APRS RX decodes our own beacon (also validates the APRS RX path, never yet confirmed against a real signal)
+- [ ] install `99-hampi.rules` so `/dev/digirig` exists (one-shot test used `/dev/ttyUSB1` directly)
+
+> **Gotcha banked:** direwolf `every=0:00` means *beacon continuously*, not once
+> — it queued ~59k frames in 7 s. One-shot = `delay=0:03 every=30:00`, kill
+> after the first. The half-duplex Digirig must be TX-only (`ADEVICE null …`)
+> or direwolf's RX queue floods with DLQ-leak errors.
 
 ## Phase B — APRS TX Suite
 

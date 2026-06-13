@@ -324,9 +324,10 @@ Every numbered roadmap item shipped. Eight live modes, one Pi, zero cloud.
 
 ## Roadmap
 
-Roadmap I ([ROADMAP.md](ROADMAP.md)) is complete as of 0.9-b3t4. The future lives in **[ROADMAP-NEXT.md](ROADMAP-NEXT.md)**:
+Roadmap I ([ROADMAP.md](ROADMAP.md)) is complete as of 0.9-b3t4. The TX era is underway in **[ROADMAP-NEXT.md](ROADMAP-NEXT.md)**:
 
-- **TX foundation** — Digirig Mobile (USB audio + hardware RTS PTT) → APRS beacon/messaging/digipeat, AX.25 connected-mode BBS terminal, SSTV transmit, Winlink
+- **TX foundation (Phase A — 🚧 in progress)** — Digirig Mobile (USB audio + hardware RTS PTT). Software path built and a valid APRS beacon transmitted on 144.390; **RF not yet confirmed** (radio keying / deviation pending an operator at the rig). The `Radio TX` page drives PTT + tone bring-up, gated behind `radio.tx_enable` + `station.callsign`.
+- **APRS TX** — beacon/messaging/digipeat; **AX.25 connected-mode** BBS terminal; **SSTV transmit**; **Winlink** (`pat`)
 - **HamPi as LAN TNC** — KISS over network for APRSdroid/RadioMail
 - **Satellite pass prediction** — `skyfield` + Celestrak TLE, alert UI on TinyGS pass window
 - **Trunked DMR · ADS-B extras · HF modes** — the long tail
