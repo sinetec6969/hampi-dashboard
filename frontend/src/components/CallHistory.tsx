@@ -7,6 +7,7 @@ interface CallRecord {
   duration_s: number
   src_id: number
   dst_id: number
+  tg_name?: string
   group: boolean
   alias: string
   callsign: string
@@ -86,7 +87,9 @@ export default function CallHistory() {
                   <tr key={c.id} style={{ borderBottom: "1px solid #1a1a1a" }}>
                     <td style={{ padding: "4px 8px", color: "#555" }}>{fmtTime(c.started_at)}</td>
                     <td style={{ padding: "4px 8px", color: "#555" }}>{fmtDur(c.duration_s)}</td>
-                    <td style={{ padding: "4px 8px", color: "#4af" }}>{c.dst_id || "—"}</td>
+                    <td style={{ padding: "4px 8px", color: "#4af" }}>
+                      {c.dst_id || "—"}{c.tg_name ? <span style={{ color: "#777" }}> {c.tg_name}</span> : null}
+                    </td>
                     <td style={{ padding: "4px 8px", overflow: "hidden" }}>
                       <div style={{ color: "#eee", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {c.callsign && <span style={{ color: "#fa0", marginRight: 5 }}>{c.callsign}</span>}

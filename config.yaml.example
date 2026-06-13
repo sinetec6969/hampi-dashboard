@@ -56,3 +56,9 @@ satellite:
   enable: true
   mqtt_host: localhost
   mqtt_port: 1883
+
+talkgroups:               # DMR talkgroup aliases — shown next to TG numbers
+  91: "Worldwide"
+  93: "North America"
+  3100: "US Bridge"
+  3116: "Texas"

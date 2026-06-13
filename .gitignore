@@ -18,3 +18,4 @@ call_history.json
 recordings/
 config.yaml
 aircraft.db
+radioid.db

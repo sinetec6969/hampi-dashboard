@@ -54,9 +54,11 @@ Decode DMR digital voice traffic — talkgroup, RadioID, caller ID, call history
 
 **Audio note:** AMBE decode via `dsd-fme` UDP was removed in 0.2.1 — persistent sample-rate mismatch caused slow-motion playback on Pi 4. DMR page is **metadata-only**. Audio re-introduction would require a hardware AMBE dongle (e.g. ThumbDV) or an off-chip decoder.
 
+**DMR polish (2026-06-12):**
+- Talkgroup aliases — `talkgroups:` map in config.yaml; `tg_name` injected into live frames and call records, shown in DMR panel + call history
+- Offline RadioID database — `build_radioid_db.py` snapshots the RadioID.net user dump into `radioid.db` (sqlite, 307k users, 17 MB). When present it's authoritative: user lookups are local reads, no radioid.net API calls (map geocoding still uses Nominatim, cached). Without it, HTTP lookup as before.
+
 **Known limitations:**
-- No talkgroup alias CSV import yet
-- No local RadioID database — lookups are HTTP (requires internet)
 - Trunked DMR (control channel) not supported
 
 ---
@@ -263,8 +265,8 @@ RTL-SDR device 0 (mode-switch)
 - [x] Systemd service — `hampi-dashboard.service` in repo root; auto-start and restart on boot
 - [x] udev rules — `99-hampi.rules` (meshtastic/tinygs tty symlinks); rtl_device config keys accept EEPROM serial strings for stable dongle selection
 - [x] ADS-B flight lookup — local `aircraft.db` sqlite (OpenSky snapshot via `build_aircraft_db.py`)
-- [ ] Talkgroup alias CSV import
-- [ ] Offline RadioID database (local SQLite snapshot)
+- [x] Talkgroup aliases — `talkgroups:` map in config.yaml (yaml beats a separate CSV)
+- [x] Offline RadioID database — `radioid.db` sqlite via `build_radioid_db.py`
 - [ ] Trunked DMR (control channel parsing)
 - [ ] P25 Phase 1 & 2, NXDN, D-STAR
 - [ ] ADS-B range rings, squawk alerts, ICAO watchlist
@@ -278,7 +280,7 @@ RTL-SDR device 0 (mode-switch)
 3. ~~**APRS**~~ — ✅ done (2026-06-12); TX via BTech APRS-K1 cable is the follow-on
 4. ~~**AX.25 packet terminal**~~ — ✅ RX monitor done (2026-06-12); connected-mode + beacon TX blocked on APRS-K1 + radio
 5. ~~**ADS-B flight lookup**~~ — ✅ done (2026-06-12): local `aircraft.db` (OpenSky snapshot, 516k aircraft)
-6. **Talkgroup aliases + RadioID local DB** — DMR polish
+6. ~~**Talkgroup aliases + RadioID local DB**~~ — ✅ done (2026-06-12)
 7. ~~**SSTV image reception**~~ — ✅ done
 8. **Satellite telemetry** — research phase first; hardware path TBD
 9. **Full beta tag**
@@ -339,7 +341,9 @@ adsb:
   lat_ref: 30.2
   lon_ref: -97.7
 
-# talkgroups: section planned — lands with priority item 6 (alias import)
+talkgroups:
+  91: "Worldwide"
+  3116: "Texas"
 ```
 
 ---

@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import socket
+import sqlite3
 import subprocess
 import time
 from contextlib import asynccontextmanager
@@ -123,6 +124,14 @@ SSTV_IMAGE_DIR: str   = os.getenv("SSTV_IMAGE_DIR", cfg("sstv.image_dir",
 # APRS configuration
 APRS_FREQ: int   = int(os.getenv("APRS_FREQ",   cfg("aprs.freq", 144390000)))
 APRS_GAIN: float = float(os.getenv("APRS_GAIN", cfg("aprs.gain", 49.6)))
+
+# DMR talkgroup aliases (config.yaml `talkgroups:` map) + offline RadioID DB
+TALKGROUPS: dict[int, str] = {int(k): str(v) for k, v in (cfg("talkgroups", None) or {}).items()}
+
+_RADIOID_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "radioid.db")
+_radioid_db: Optional[sqlite3.Connection] = None
+if os.path.isfile(_RADIOID_DB_PATH):
+    _radioid_db = sqlite3.connect(_RADIOID_DB_PATH, check_same_thread=False)
 
 # Satellite / TinyGS configuration
 SAT_ENABLE:  bool = cfg_bool("SAT_ENABLE", "satellite.enable", 1)
@@ -349,10 +358,12 @@ async def sstv_loop() -> None:
 # ---------------------------------------------------------------------------
 
 async def on_meta(frame_dict: dict) -> None:
+    frame_dict["tg_name"] = TALKGROUPS.get(frame_dict.get("dst_id", 0), "")
     await broadcast_json(dmr_clients, frame_dict)
 
 
 async def on_call_end(record: dict) -> None:
+    record["tg_name"] = TALKGROUPS.get(record.get("dst_id", 0), "")
     src_id = record.get("src_id", 0)
     if src_id:
         try:
@@ -896,31 +907,45 @@ async def _lookup_dmr_id(dmr_id: int) -> dict:
         if now < expires:
             return cached
 
-    url = f"https://www.radioid.net/api/dmr/user/?id={dmr_id}"
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(url)
-            r.raise_for_status()
-            data = r.json()
-    except Exception as exc:
-        logger.warning("RadioID lookup failed for %d: %s", dmr_id, exc)
-        return {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": "",
-                "lat": None, "lon": None}
-
-    results = data.get("results", [])
-    if results:
-        u = results[0]
-        result = {
-            "dmr_id":   dmr_id,
-            "callsign": u.get("callsign", ""),
-            "name":     f"{u.get('fname', '')} {u.get('surname', '')}".strip(),
-            "city":     u.get("city", ""),
-            "state":    u.get("state", ""),
-            "country":  u.get("country", ""),
-        }
+    if _radioid_db is not None:
+        # Offline path: radioid.db is authoritative — a miss stays a miss,
+        # no HTTP fallback (build with build_radioid_db.py; rerun to refresh)
+        row = _radioid_db.execute(
+            "SELECT callsign, name, city, state, country FROM users WHERE id=?",
+            (dmr_id,),
+        ).fetchone()
+        if row:
+            result = {"dmr_id": dmr_id, "callsign": row[0], "name": row[1],
+                      "city": row[2], "state": row[3], "country": row[4]}
+        else:
+            result = {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "",
+                      "state": "", "country": "", "lat": None, "lon": None}
     else:
-        result = {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": "",
-                  "country": "", "lat": None, "lon": None}
+        url = f"https://www.radioid.net/api/dmr/user/?id={dmr_id}"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(url)
+                r.raise_for_status()
+                data = r.json()
+        except Exception as exc:
+            logger.warning("RadioID lookup failed for %d: %s", dmr_id, exc)
+            return {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": "",
+                    "lat": None, "lon": None}
+
+        results = data.get("results", [])
+        if results:
+            u = results[0]
+            result = {
+                "dmr_id":   dmr_id,
+                "callsign": u.get("callsign", ""),
+                "name":     f"{u.get('fname', '')} {u.get('surname', '')}".strip(),
+                "city":     u.get("city", ""),
+                "state":    u.get("state", ""),
+                "country":  u.get("country", ""),
+            }
+        else:
+            result = {"dmr_id": dmr_id, "callsign": "", "name": "", "city": "", "state": "",
+                      "country": "", "lat": None, "lon": None}
 
     coords = await _geocode(result["city"], result["state"], result.get("country", ""))
     result["lat"] = coords[0] if coords else None

@@ -7,6 +7,7 @@ interface DMRFrame {
   errors: number
   src_id: number
   dst_id: number
+  tg_name?: string
   group: boolean
   alias: string
   color_code: number
@@ -138,7 +139,7 @@ export default function DMRPanel() {
             {f.src_id > 0 && (
               <span style={{ fontSize: '0.65rem', color: '#aaa' }}>
                 {f.alias || f.src_id}
-                {f.dst_id > 0 && <span style={{ color: '#555' }}>→TG{f.dst_id}</span>}
+                {f.dst_id > 0 && <span style={{ color: '#555' }}>→TG{f.dst_id}{f.tg_name ? ` ${f.tg_name}` : ''}</span>}
               </span>
             )}
             {f.errors > 0 && <span className="badge badge-red">E:{f.errors}</span>}
