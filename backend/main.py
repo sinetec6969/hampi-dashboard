@@ -36,6 +36,7 @@ from adsb import ADSBDecoder
 from airband import AirbandScanner, DEFAULT_CHANNELS
 from aprs import APRSDecoder
 from ax25 import AX25Decoder
+from radio import RadioInterface
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
@@ -138,6 +139,12 @@ SAT_ENABLE:  bool = cfg_bool("SAT_ENABLE", "satellite.enable", 1)
 MQTT_HOST:   str  = os.getenv("MQTT_HOST",  cfg("satellite.mqtt_host", "localhost"))
 MQTT_PORT:   int  = int(os.getenv("MQTT_PORT", cfg("satellite.mqtt_port", 1883)))
 
+# Station identity + radio TX (Phase A — Digirig). TX is hard-gated off by default.
+STATION:     dict = cfg("station", None) or {}
+TX_ENABLE:   bool = cfg_bool("TX_ENABLE", "radio.tx_enable", 0)
+RADIO_SERIAL: str = os.getenv("RADIO_SERIAL", cfg("radio.serial", "/dev/digirig"))
+RADIO_AUDIO:  str = os.getenv("RADIO_AUDIO",  cfg("radio.audio", "hw:CARD=Device"))
+
 # ---------------------------------------------------------------------------
 # Shared state
 # ---------------------------------------------------------------------------
@@ -165,6 +172,7 @@ _mode_sstv: Optional[SSTVDecoder] = None
 _mode_aprs: Optional[APRSDecoder] = None
 _mode_ax25: Optional[AX25Decoder] = None  # rides along with aprs mode (shared direwolf)
 satellite_monitor: Optional[SatelliteMonitor] = None
+radio: Optional[RadioInterface] = None
 
 # Last-known airband status — returned by /api/airband/status
 airband_status: dict = {
@@ -448,7 +456,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, airband, meshtastic, adsb_decoder, sdr_task, satellite_monitor
+    global sdr, decoder, airband, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -544,6 +552,21 @@ async def lifespan(app: FastAPI):
             logger.warning("MeshtasticHandler failed to start", exc_info=True)
             meshtastic = None
 
+    # Open the radio TX interface (Digirig) only when TX is enabled — opening the
+    # serial port asserts RTS briefly (a momentary key), so we don't touch it
+    # until the operator has opted in with tx_enable + callsign. RX is unaffected.
+    if TX_ENABLE and STATION.get("callsign", "").strip():
+        try:
+            radio = RadioInterface(RADIO_SERIAL, RADIO_AUDIO, TX_ENABLE,
+                                   STATION.get("callsign", ""))
+            radio.start()
+        except Exception:
+            logger.warning("RadioInterface failed to open %s — TX unavailable", RADIO_SERIAL)
+            radio = None
+    else:
+        logger.info("Radio TX disabled (tx_enable=%s, callsign=%s) — Digirig not opened",
+                    TX_ENABLE, STATION.get("callsign", "") or "—")
+
     yield  # application is running
 
     # Shutdown
@@ -570,6 +593,8 @@ async def lifespan(app: FastAPI):
         await meshtastic.stop()
     if satellite_monitor is not None:
         await satellite_monitor.stop()
+    if radio is not None:
+        radio.stop()
     logger.info("Shutdown complete")
 
 
@@ -1290,6 +1315,43 @@ async def api_ax25_frames():
 async def api_ax25_heard():
     cur = _cur_ax25()
     return list(cur.heard.values()) if cur else []
+
+
+# ---------------------------------------------------------------------------
+# Radio TX (Phase A — Digirig). Hard-gated on radio.tx_enable + station.callsign.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/radio/status")
+async def api_radio_status():
+    if radio is None:
+        return {"open": False, "ready": False, "tx_enable": TX_ENABLE,
+                "callsign": STATION.get("callsign", ""), "serial": RADIO_SERIAL}
+    return {**radio.status(), "station": STATION}
+
+
+@app.post("/api/radio/ptt_test")
+async def api_radio_ptt_test(seconds: float = 1.0):
+    if radio is None:
+        raise HTTPException(status_code=503, detail="radio not available")
+    seconds = min(max(seconds, 0.1), 5.0)
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, radio.ptt_test, seconds)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    return {"status": "ok", "keyed_s": seconds}
+
+
+@app.post("/api/radio/tone")
+async def api_radio_tone(freq: int = 1000, seconds: float = 2.0):
+    if radio is None:
+        raise HTTPException(status_code=503, detail="radio not available")
+    seconds = min(max(seconds, 0.1), 10.0)
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            None, radio.transmit_tone, freq, seconds)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    return {"status": "ok", "freq": freq, "seconds": seconds}
 
 
 # ---------------------------------------------------------------------------

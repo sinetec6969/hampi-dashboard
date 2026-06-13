@@ -62,3 +62,18 @@ talkgroups:               # DMR talkgroup aliases — shown next to TG numbers
   93: "North America"
   3100: "US Bridge"
   3116: "Texas"
+
+# Your station identity — REQUIRED before any transmit (legal ID).
+station:
+  callsign: ""            # e.g. "N0CALL" — TX refuses while blank
+  ssid: 7                 # APRS SSID (7 = HT)
+  lat: 0.0
+  lon: 0.0
+  comment: "HamPi"
+
+# Transmit hardware (Digirig Mobile). TX is OFF by default — flip tx_enable
+# only when callsign is set and you intend to go on the air.
+radio:
+  tx_enable: false        # master TX safety switch
+  serial: /dev/digirig    # CP2102N — RTS keys PTT (install 99-hampi.rules)
+  audio: hw:CARD=Device   # Digirig C-Media codec (`aplay -l` to confirm)

@@ -4,6 +4,8 @@
 # Serial devices get fixed /dev names regardless of plug order:
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", SYMLINK+="meshtastic"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", ATTRS{serial}=="591E009758", SYMLINK+="tinygs"
+# Digirig Mobile — CP2102N (serial PTT via RTS); shares VID:PID with the Heltec, match on serial:
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="f46a18916be7ed11b9016c6262c613ac", SYMLINK+="digirig"
 
 # RTL-SDR symlinks (informational — rtl_tcp/rtl_adsb select by -d index/serial,
 # not /dev path; set unique EEPROM serials and use rtl_device in config.yaml):
