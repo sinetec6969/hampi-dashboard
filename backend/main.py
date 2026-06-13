@@ -37,6 +37,7 @@ from airband import AirbandScanner, DEFAULT_CHANNELS
 from aprs import APRSDecoder
 from ax25 import AX25Decoder
 from radio import RadioInterface
+from satpredict import SatTracker
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
@@ -126,6 +127,10 @@ SSTV_IMAGE_DIR: str   = os.getenv("SSTV_IMAGE_DIR", cfg("sstv.image_dir",
 APRS_FREQ: int   = int(os.getenv("APRS_FREQ",   cfg("aprs.freq", 144390000)))
 APRS_GAIN: float = float(os.getenv("APRS_GAIN", cfg("aprs.gain", 49.6)))
 
+# QTH + SSTV satellite tracking (Maidenhead grid; sat list optional override)
+QTH_GRID:  str = os.getenv("QTH_GRID", cfg("qth.grid", "EM95of"))
+SSTV_SATS: Optional[list] = cfg("sstv_satellites", None)
+
 # DMR talkgroup aliases (config.yaml `talkgroups:` map) + offline RadioID DB
 TALKGROUPS: dict[int, str] = {int(k): str(v) for k, v in (cfg("talkgroups", None) or {}).items()}
 
@@ -173,6 +178,7 @@ _mode_aprs: Optional[APRSDecoder] = None
 _mode_ax25: Optional[AX25Decoder] = None  # rides along with aprs mode (shared direwolf)
 satellite_monitor: Optional[SatelliteMonitor] = None
 radio: Optional[RadioInterface] = None
+sat_tracker: Optional[SatTracker] = None
 
 # Last-known airband status — returned by /api/airband/status
 airband_status: dict = {
@@ -339,11 +345,25 @@ async def aprs_loop() -> None:
 async def sstv_loop() -> None:
     loop = asyncio.get_running_loop()
     logger.info("SSTV loop started — freq=%d Hz", SSTV_FREQ)
+    target = SSTV_FREQ
+    last_dop = 0.0
     try:
         while True:
             try:
                 iq  = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
-                pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, SSTV_FREQ)
+                # If a satellite is tracked, follow its Doppler-shifted downlink
+                # (SDR centre is retuned to the downlink on selection). Recompute
+                # once a second — the shift drifts slowly relative to the chunk rate.
+                now = time.time()
+                if sat_tracker is not None and sat_tracker.tracked is not None:
+                    if now - last_dop > 1.0:
+                        rx = await loop.run_in_executor(None, sat_tracker.tracked_rx_freq)
+                        if rx:
+                            target = rx
+                        last_dop = now
+                else:
+                    target = SSTV_FREQ
+                pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, target)
                 if _mode_sstv:
                     await _mode_sstv.write_audio(pcm)
                 await asyncio.sleep(0)
@@ -456,7 +476,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, airband, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio
+    global sdr, decoder, airband, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -566,6 +586,18 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Radio TX disabled (tx_enable=%s, callsign=%s) — Digirig not opened",
                     TX_ENABLE, STATION.get("callsign", "") or "—")
+
+    # SSTV satellite tracker — load AMSAT TLEs (network, graceful on failure)
+    try:
+        sat_tracker = SatTracker(QTH_GRID, SSTV_SATS)
+        ok = await loop.run_in_executor(None, sat_tracker.refresh_tles)
+        logger.info("SatTracker ready: QTH %s (%.4f,%.4f), %d SSTV sats",
+                    QTH_GRID, sat_tracker.lat, sat_tracker.lon, sat_tracker._sats and len(sat_tracker._sats) or 0)
+        if not ok:
+            logger.warning("SatTracker: no TLEs loaded (AMSAT unreachable?)")
+    except Exception:
+        logger.warning("SatTracker init failed", exc_info=True)
+        sat_tracker = None
 
     yield  # application is running
 
@@ -850,7 +882,10 @@ async def api_set_sdr_mode(mode: str):
             await _mode_adsb.start()
 
         elif mode == "sstv":
-            sdr.freq = SSTV_FREQ
+            # If a satellite is already tracked, centre on its downlink so the
+            # Doppler follower in sstv_loop has the signal in the passband.
+            tracked_dl = sat_tracker.tracked_downlink() if sat_tracker else None
+            sdr.freq = tracked_dl or SSTV_FREQ
             sdr.gain = SSTV_GAIN
             await loop.run_in_executor(None, sdr.start)
             _mode_sstv = SSTVDecoder(
@@ -1221,6 +1256,48 @@ async def api_sstv_image(filename: str):
     if not os.path.isfile(path):
         raise HTTPException(status_code=404)
     return FileResponse(path, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# SSTV satellite tracking — AMSAT TLEs, pass prediction, Doppler
+# ---------------------------------------------------------------------------
+
+@app.get("/api/sat/sstv")
+async def api_sat_sstv():
+    if sat_tracker is None:
+        return {"qth": {"grid": QTH_GRID}, "tracked": None, "satellites": []}
+    info = await asyncio.get_running_loop().run_in_executor(None, sat_tracker.info)
+    return {"qth": sat_tracker.status(), "tracked": sat_tracker.tracked,
+            "sstv_active": active_sdr_mode == "sstv", "satellites": info}
+
+
+@app.post("/api/sat/track")
+async def api_sat_track(norad: int = 0):
+    """Select a satellite to track (norad=0 to stop). Retunes the SDR centre to
+    the downlink when SSTV mode is active so Doppler stays within the passband."""
+    if sat_tracker is None:
+        raise HTTPException(status_code=503, detail="satellite tracker unavailable")
+    if norad == 0:
+        sat_tracker.tracked = None
+        if active_sdr_mode == "sstv":
+            sdr.set_freq(SSTV_FREQ)
+        return {"tracked": None, "rx_freq": SSTV_FREQ}
+    if norad not in sat_tracker._sats:
+        raise HTTPException(status_code=404, detail=f"no TLE for NORAD {norad}")
+    sat_tracker.tracked = norad
+    downlink = sat_tracker.tracked_downlink()
+    if active_sdr_mode == "sstv" and downlink:
+        sdr.set_freq(downlink)   # Doppler offset applied per-chunk in sstv_loop
+    return {"tracked": norad, "downlink": downlink,
+            "rx_freq": sat_tracker.tracked_rx_freq()}
+
+
+@app.post("/api/sat/tle/refresh")
+async def api_sat_tle_refresh():
+    if sat_tracker is None:
+        raise HTTPException(status_code=503, detail="satellite tracker unavailable")
+    ok = await asyncio.get_running_loop().run_in_executor(None, sat_tracker.refresh_tles, True)
+    return {"ok": ok, "sats_loaded": len(sat_tracker._sats)}
 
 
 # ---------------------------------------------------------------------------

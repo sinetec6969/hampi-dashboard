@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import SatPanel from '../components/SatPanel'
 
 interface SSTVStatus {
   state:       'idle' | 'vis_decode' | 'sync_hunt' | 'line_decode' | 'disabled'
@@ -162,6 +163,11 @@ export default function SSTVPage() {
             <div className="sstv-rms-bar" style={{ width: `${rmsBar}%` }} />
           </div>
         </div>
+      </div>
+
+      {/* Satellite tracking */}
+      <div style={{ padding: '0 12px', marginBottom: 8 }}>
+        <SatPanel />
       </div>
 
       {/* Body */}

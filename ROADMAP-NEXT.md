@@ -104,7 +104,8 @@ Parked until an HF rig (or direct-sampling experiments) happen:
 
 ## Carried-over backlog (Roadmap I)
 
-- [ ] **Satellite pass prediction** — `skyfield` + Celestrak TLE, pass window overlay on SatellitePage, auto-tune hook for ISS SSTV
+- [x] **SSTV satellite tracking** (2026-06-13) — `satpredict.py`: AMSAT TLEs (cached/daily), skyfield pass prediction + Doppler for QTH `EM95of`, curated SSTV bird list (ISS / UmKA-1 / SONATE-2). SSTVPage `SatPanel`: live el/az, next-pass countdown, descriptors, click-to-track. Tracking retunes the SDR to the downlink and the SSTV loop follows Doppler per-chunk.
+- [ ] **Satellite pass prediction — broaden** — same engine on SatellitePage for the TinyGS LoRa birds; pass-window alerts / auto-tune for scheduled ISS SSTV events
 - [ ] **Trunked DMR** — control channel parsing; P25 Phase 1/2, NXDN, D-STAR beyond that
 - [ ] **ADS-B extras** — range rings, squawk/emergency flags, ICAO watchlist alerts, CRC-filter the bit-garbled ICAOs from rtl_adsb
 - [ ] **SSTV slant correction** — sample-rate drift estimate across 240 lines

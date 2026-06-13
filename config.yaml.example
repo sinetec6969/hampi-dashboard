@@ -43,6 +43,14 @@ sstv:
   gain: 40.0
   # image_dir: ../sstv_images
 
+qth:
+  grid: EM95of            # Maidenhead locator — drives satellite pass prediction
+
+# Satellites tracked on the SSTV page (Doppler + pass prediction vs AMSAT TLEs).
+# Omit to use the built-in defaults (ISS, UmKA-1, SONATE-2).
+# sstv_satellites:
+#   - { norad: 25544, name: "ISS", freq: 145800000, mode: "FM · PD120", desc: "ARISS SSTV events" }
+
 aprs:
   freq: 144390000         # North America APRS
   gain: 49.6

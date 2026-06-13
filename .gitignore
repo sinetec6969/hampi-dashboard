@@ -19,3 +19,4 @@ recordings/
 config.yaml
 aircraft.db
 radioid.db
+tle_amsat.txt

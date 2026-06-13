@@ -10,3 +10,4 @@ paho-mqtt
 pillow
 pyyaml
 aprslib
+skyfield
