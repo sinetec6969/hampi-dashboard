@@ -2,8 +2,8 @@
 
 Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a locally-hosted web server. All decoding, storage, and serving happens on-device — no cloud dependencies.
 
-> **Current version:** 0.3.0_p4ck3t5 (2026-06-12)  
-> **Status:** Pre-beta. DMR (metadata), ADS-B, Airband AM, Meshtastic, SSTV, APRS, and Satellite telemetry (via TinyGS hardware → local MQTT) are all live. config.yaml + systemd + udev rules in place. Mobile-responsive. Single RTL-SDR dongle covers all SDR modes via the mode switcher; second dongle runs Airband dedicated. DMR audio decode was removed — AMBE via dsd-fme had persistent sample-rate issues on Pi 4; DMR page is now metadata-only (talkgroup, caller, call history, map).
+> **Current version:** 0.9-b3t4 (2026-06-12)  
+> **Status:** **Beta.** DMR (metadata + offline RadioID + TG aliases), ADS-B (+ local flight lookup), Airband AM, Meshtastic, SSTV, APRS, AX.25 (RX terminal), and Satellite telemetry (via TinyGS hardware → local MQTT) are all live. config.yaml + systemd + udev rules in place. Remaining work is feature backlog, not core. Mobile-responsive. Single RTL-SDR dongle covers all SDR modes via the mode switcher; second dongle runs Airband dedicated. DMR audio decode was removed — AMBE via dsd-fme had persistent sample-rate issues on Pi 4; DMR page is now metadata-only (talkgroup, caller, call history, map).
 
 ---
 
@@ -49,7 +49,7 @@ Decode DMR digital voice traffic — talkgroup, RadioID, caller ID, call history
 
 **Implemented (0.1.0_b4s3c4mp):**
 - `dmr.py` — `DMRDecoder`: `dsd-fme` subprocess, stdout parser, talkgroup/RadioID extraction, RadioID.net HTTP lookup, caller registry
-- `main.py` — `/ws/dmr` WebSocket, `GET /api/dmr/status`, `GET /api/dmr/history`
+- `main.py` — `/ws/dmr` WebSocket, `GET /api/dmr/status`, `GET /api/calls` (call history)
 - `DMRPage.tsx` — call history table, active caller panel, Leaflet map (IP geolocation of RadioID), talkgroup decode
 
 **Audio note:** AMBE decode via `dsd-fme` UDP was removed in 0.2.1 — persistent sample-rate mismatch caused slow-motion playback on Pi 4. DMR page is **metadata-only**. Audio re-introduction would require a hardware AMBE dongle (e.g. ThumbDV) or an off-chip decoder.
@@ -283,7 +283,7 @@ RTL-SDR device 0 (mode-switch)
 6. ~~**Talkgroup aliases + RadioID local DB**~~ — ✅ done (2026-06-12)
 7. ~~**SSTV image reception**~~ — ✅ done
 8. **Satellite telemetry** — research phase first; hardware path TBD
-9. **Full beta tag**
+9. ~~**Full beta tag**~~ — ✅ **0.9-b3t4** (2026-06-12)
 
 ---
 
@@ -362,3 +362,7 @@ talkgroups:
 ✅ Satellite telemetry (TinyGS hardware → local MQTT) — 0.2.2_rustylives  
 ✅ config.yaml + systemd service + udev rules — 0.3.0_p4ck3t5  
 ✅ APRS station monitoring (direwolf + aprslib) — 0.3.0_p4ck3t5  
+✅ AX.25 RX terminal (KISS, waterfall, live tuning) — 0.9-b3t4  
+✅ ADS-B flight lookup (local aircraft.db, 516k aircraft) — 0.9-b3t4  
+✅ Talkgroup aliases + offline RadioID DB (307k users) — 0.9-b3t4  
+✅ **Beta tag** — 0.9-b3t4 (2026-06-12)  
