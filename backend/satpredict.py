@@ -19,7 +19,18 @@ from skyfield.api import EarthSatellite, load, wgs84
 logger = logging.getLogger(__name__)
 
 AMSAT_TLE_URL = "https://www.amsat.org/tle/current/nasabare.txt"
+CELESTRAK_WX_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=tle"
+TLE_URLS = [AMSAT_TLE_URL, CELESTRAK_WX_URL]  # amateur birds + weather (METEOR/NOAA)
 C = 299_792_458.0  # m/s
+
+# METEOR-M LRPT weather satellites (137 MHz QPSK; decoded by SatDump, see meteor.py).
+DEFAULT_METEOR_SATS = [
+    {"norad": 59051, "name": "METEOR-M2-4", "freq": 137_900_000, "mode": "QPSK · LRPT 72k",
+     "desc": "Russian polar weather sat (2024) — MSU-MR visible/IR LRPT on 137.9 FM. "
+             "The most active LRPT bird; SatDump decodes to MSU-MR composites."},
+    {"norad": 57166, "name": "METEOR-M2-3", "freq": 137_900_000, "mode": "QPSK · LRPT 72k",
+     "desc": "Russian polar weather sat (2023) — MSU-MR LRPT, typically 137.9 FM."},
+]
 
 # Curated satellites known to transmit SSTV. Frequencies are downlink centres;
 # editable via config.yaml `sstv_satellites:`. ISS is the reliable one.
@@ -53,13 +64,18 @@ def grid_to_latlon(grid: str) -> tuple[float, float]:
 
 
 class SatTracker:
-    def __init__(self, grid: str, satellites: Optional[list[dict]] = None,
-                 cache_path: Optional[str] = None, tle_max_age_h: float = 24.0):
+    def __init__(self, grid: str, sstv_sats: Optional[list[dict]] = None,
+                 meteor_sats: Optional[list[dict]] = None,
+                 cache_path: Optional[str] = None, tle_max_age_h: float = 24.0,
+                 tle_urls: Optional[list[str]] = None):
         self.grid = grid
         self.lat, self.lon = grid_to_latlon(grid)
-        self.sats_cfg = satellites or DEFAULT_SSTV_SATS
+        self.sstv_sats = sstv_sats or DEFAULT_SSTV_SATS
+        self.meteor_sats = meteor_sats or DEFAULT_METEOR_SATS
+        self._all_cfg = self.sstv_sats + self.meteor_sats
+        self.tle_urls = tle_urls or TLE_URLS
         self.cache_path = cache_path or os.path.join(
-            os.path.dirname(__file__), "..", "tle_amsat.txt")
+            os.path.dirname(__file__), "..", "tle_cache.txt")
         self.tle_max_age_h = tle_max_age_h
 
         self._ts = load.timescale()
@@ -74,13 +90,20 @@ class SatTracker:
         fresh = (os.path.isfile(self.cache_path) and
                  time.time() - os.path.getmtime(self.cache_path) < self.tle_max_age_h * 3600)
         if force or not fresh:
-            try:
-                urllib.request.urlretrieve(AMSAT_TLE_URL, self.cache_path)
-                logger.info("AMSAT TLEs refreshed → %s", self.cache_path)
-            except Exception as exc:
-                logger.warning("AMSAT TLE fetch failed: %s", exc)
-                if not os.path.isfile(self.cache_path):
-                    return False
+            merged = []
+            for url in self.tle_urls:
+                try:
+                    with urllib.request.urlopen(url, timeout=20) as r:
+                        merged.append(r.read().decode("utf-8", errors="replace"))
+                except Exception as exc:
+                    logger.warning("TLE fetch failed (%s): %s", url, exc)
+            if merged:
+                with open(self.cache_path, "w") as f:
+                    f.write("\n".join(merged))
+                logger.info("TLEs refreshed from %d source(s) → %s",
+                            len(merged), self.cache_path)
+            elif not os.path.isfile(self.cache_path):
+                return False
         self._load()
         return bool(self._sats)
 
@@ -89,15 +112,17 @@ class SatTracker:
             lines = [l.rstrip() for l in open(self.cache_path)]
         except FileNotFoundError:
             return
-        want = {s["norad"] for s in self.sats_cfg}
+        # Load every 3-line group keyed by NORAD — the set is small (~120).
         self._sats.clear()
         i = 0
         while i + 2 < len(lines) + 1:
             if i + 2 < len(lines) and lines[i + 1].startswith("1 ") and lines[i + 2].startswith("2 "):
-                norad = int(lines[i + 1][2:7])
-                if norad in want:
+                try:
+                    norad = int(lines[i + 1][2:7])
                     self._sats[norad] = EarthSatellite(lines[i + 1], lines[i + 2],
                                                        lines[i].strip(), self._ts)
+                except Exception:
+                    pass
                 i += 3
             else:
                 i += 1
@@ -155,10 +180,10 @@ class SatTracker:
             "visible": bool(alt.degrees > 0),
         }
 
-    def info(self) -> list[dict]:
-        """Full status for every configured SSTV satellite."""
+    def info(self, which: Optional[list[dict]] = None) -> list[dict]:
+        """Full status for a satellite list (defaults to the SSTV birds)."""
         out = []
-        for s in self.sats_cfg:
+        for s in (which if which is not None else self.sstv_sats):
             n = s["norad"]
             row = {**s, "tracked": n == self.tracked, "has_tle": n in self._sats}
             if n in self._sats:
@@ -171,7 +196,7 @@ class SatTracker:
         """Doppler-corrected downlink for the tracked sat, or None."""
         if self.tracked is None:
             return None
-        cfg = next((s for s in self.sats_cfg if s["norad"] == self.tracked), None)
+        cfg = next((s for s in self._all_cfg if s["norad"] == self.tracked), None)
         if cfg is None:
             return None
         return self._live(self.tracked, cfg["freq"]).get("rx_freq")
@@ -179,7 +204,7 @@ class SatTracker:
     def tracked_downlink(self) -> Optional[int]:
         if self.tracked is None:
             return None
-        cfg = next((s for s in self.sats_cfg if s["norad"] == self.tracked), None)
+        cfg = next((s for s in self._all_cfg if s["norad"] == self.tracked), None)
         return cfg["freq"] if cfg else None
 
     def status(self) -> dict:
@@ -190,11 +215,16 @@ class SatTracker:
 if __name__ == "__main__":
     assert grid_to_latlon("EM95of") == (35.2292, -80.7917), grid_to_latlon("EM95of")
     t = SatTracker("EM95of")
-    src = "/tmp/amsat.txt" if os.path.isfile("/tmp/amsat.txt") else None
-    if src:
-        t.cache_path = src
+    # Seed cache from any pre-downloaded /tmp TLE files (amsat + celestrak weather)
+    seed = [p for p in ("/tmp/amsat.txt", "/tmp/celestrak_wx.txt") if os.path.isfile(p)]
+    if seed:
+        with open(t.cache_path, "w") as out:
+            for p in seed:
+                out.write(open(p).read() + "\n")
     assert t.refresh_tles(), "no TLEs loaded"
     assert 25544 in t._sats, "ISS not loaded"
+    if 59051 in t._sats:
+        print("METEOR-M2-4 loaded ✓")
     info = t.info()
     iss = next(r for r in info if r["norad"] == 25544)
     assert "el" in iss and "doppler_hz" in iss, iss

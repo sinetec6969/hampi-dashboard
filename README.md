@@ -29,7 +29,8 @@ Digital voice decoded. Aircraft tracked. Mesh nodes mapped. SSTV images received
 | 📻 APRS | ✅ Live | `direwolf` TNC · station map · packet log · weather decode |
 | 📟 AX.25 | ✅ Live | KISS terminal · raw frame log · waterfall click-to-tune · RX-only (TX pending APRS-K1) |
 | 🌐 Meshtastic LoRa | ✅ Live | Mesh monitor · node map · live messages · send / DM |
-| 📺 SSTV | ✅ Live | Scottie S1/S2 · Martin M1/M2 · Robot 36 · live canvas · image gallery |
+| 📺 SSTV | ✅ Live | Scottie S1/S2 · Martin M1/M2 · Robot 36 · live canvas · satellite tracking + Doppler |
+| 🌍 METEOR LRPT | ✅ Live | METEOR-M2 137 MHz QPSK weather imagery via SatDump · MSU-MR composites · pass prediction |
 | 🛰️ Satellite | ✅ Live | TinyGS hardware receiver (LilyGO T3 LoRa32) · local MQTT broker · live telemetry + RX packet feed |
 | 📊 Waterfall | ✅ Live | 2.4 MHz FFT · click-to-tune · memory channels |
 | 📱 Mobile UI | ✅ Live | Responsive layout · auto-detects phone vs desktop |
@@ -56,8 +57,8 @@ One dongle covers all SDR modes via the home-page mode-switcher. Add more dongle
 echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/rtlsdr.conf
 sudo modprobe -r dvb_usb_rtl28xxu 2>/dev/null; true
 
-# System packages (direwolf = APRS/AX.25 TNC)
-sudo apt install rtl-sdr dsd-fme direwolf
+# System packages (direwolf = APRS/AX.25 TNC, satdump = METEOR LRPT)
+sudo apt install rtl-sdr dsd-fme direwolf satdump
 
 # Serial access (Meshtastic)
 sudo usermod -aG dialout $USER
@@ -170,6 +171,14 @@ Switch device 0 to SSTV mode and receive Slow Scan Television images in your bro
 - **Talkgroup aliases** — `talkgroups:` map in config.yaml shown next to TG numbers in the live panel and call history
 - **Caller map** — Nominatim geocodes city/state (cached); click pin for full ID card
 - **Call history** — persisted JSON log; survives server restarts
+
+### 🌍 METEOR LRPT — Weather Satellite Imagery
+
+- METEOR-M2 series LRPT on 137 MHz (QPSK 72k) decoded by **SatDump** — the full Viterbi → Reed-Solomon → CCSDS → JPEG chain, not reinvented
+- SatDump runs as a subprocess on device 0 via a dedicated `rtl_tcp` (the apt build's native `rtlsdr` source plugin doesn't register; the `rtltcp` source does)
+- MSU-MR visible/IR channel composites land in a live gallery as the pass decodes
+- **Pass prediction** for your QTH (METEOR TLEs from Celestrak weather) — AOS/LOS countdown so you know when to catch one
+- Switch SDR mode to METEOR from the home page; needs `satdump` installed
 
 ### 📻 APRS — Station Monitoring
 

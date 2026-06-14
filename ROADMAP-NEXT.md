@@ -105,6 +105,7 @@ Parked until an HF rig (or direct-sampling experiments) happen:
 ## Carried-over backlog (Roadmap I)
 
 - [x] **SSTV satellite tracking** (2026-06-13) — `satpredict.py`: AMSAT TLEs (cached/daily), skyfield pass prediction + Doppler for QTH `EM95of`, curated SSTV bird list (ISS / UmKA-1 / SONATE-2). SSTVPage `SatPanel`: live el/az, next-pass countdown, descriptors, click-to-track. Tracking retunes the SDR to the downlink and the SSTV loop follows Doppler per-chunk.
+- [x] **METEOR LRPT** (2026-06-14) — `meteor.py`: SatDump live decoder as a subprocess on device 0 (dedicated `rtl_tcp` + satdump `rtltcp` source; native `rtlsdr` plugin doesn't register in the apt 1.2.2 build). METEOR-M2-3/4 137 MHz QPSK → MSU-MR composites. `MeteorPage` with live status/SNR, image gallery, pass prediction (Celestrak weather TLEs merged into `satpredict`). Home-page mode choice. Decode chain verified live on hardware (Viterbi running, NOSYNC pending a real pass).
 - [ ] **Satellite pass prediction — broaden** — same engine on SatellitePage for the TinyGS LoRa birds; pass-window alerts / auto-tune for scheduled ISS SSTV events
 - [ ] **Trunked DMR** — control channel parsing; P25 Phase 1/2, NXDN, D-STAR beyond that
 - [ ] **ADS-B extras** — range rings, squawk/emergency flags, ICAO watchlist alerts, CRC-filter the bit-garbled ICAOs from rtl_adsb

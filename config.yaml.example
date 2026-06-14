@@ -43,6 +43,13 @@ sstv:
   gain: 40.0
   # image_dir: ../sstv_images
 
+meteor:                   # METEOR-M LRPT weather imagery (needs: apt install satdump)
+  freq: 137900000         # 137.9 primary / 137.1 backup
+  gain: 42.0
+  samplerate: 1000000
+  pipeline: meteor_m2_lrpt
+  # image_dir: ../meteor_images
+
 qth:
   grid: EM95of            # Maidenhead locator — drives satellite pass prediction
 

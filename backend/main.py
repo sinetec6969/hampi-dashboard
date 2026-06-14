@@ -38,6 +38,7 @@ from aprs import APRSDecoder
 from ax25 import AX25Decoder
 from radio import RadioInterface
 from satpredict import SatTracker
+from meteor import MeteorDecoder
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
@@ -131,6 +132,14 @@ APRS_GAIN: float = float(os.getenv("APRS_GAIN", cfg("aprs.gain", 49.6)))
 QTH_GRID:  str = os.getenv("QTH_GRID", cfg("qth.grid", "EM95of"))
 SSTV_SATS: Optional[list] = cfg("sstv_satellites", None)
 
+# METEOR LRPT (SatDump subprocess on device 0)
+METEOR_FREQ:     int   = int(os.getenv("METEOR_FREQ", cfg("meteor.freq", 137900000)))
+METEOR_GAIN:     float = float(os.getenv("METEOR_GAIN", cfg("meteor.gain", 42.0)))
+METEOR_SR:       int   = int(os.getenv("METEOR_SAMPLERATE", cfg("meteor.samplerate", 1000000)))
+METEOR_PIPELINE: str   = os.getenv("METEOR_PIPELINE", cfg("meteor.pipeline", "meteor_m2_lrpt"))
+METEOR_IMAGE_DIR: str  = os.getenv("METEOR_IMAGE_DIR", cfg("meteor.image_dir",
+    os.path.join(os.path.dirname(__file__), "..", "meteor_images")))
+
 # DMR talkgroup aliases (config.yaml `talkgroups:` map) + offline RadioID DB
 TALKGROUPS: dict[int, str] = {int(k): str(v) for k, v in (cfg("talkgroups", None) or {}).items()}
 
@@ -172,10 +181,12 @@ sstv_clients:       Set[WebSocket] = set()
 satellite_clients:  Set[WebSocket] = set()
 aprs_clients:       Set[WebSocket] = set()
 ax25_clients:       Set[WebSocket] = set()
+meteor_clients:     Set[WebSocket] = set()
 
 _mode_sstv: Optional[SSTVDecoder] = None
 _mode_aprs: Optional[APRSDecoder] = None
 _mode_ax25: Optional[AX25Decoder] = None  # rides along with aprs mode (shared direwolf)
+_mode_meteor: Optional[MeteorDecoder] = None  # SatDump owns device 0 directly
 satellite_monitor: Optional[SatelliteMonitor] = None
 radio: Optional[RadioInterface] = None
 sat_tracker: Optional[SatTracker] = None
@@ -302,6 +313,14 @@ async def on_satellite_packet(packet: dict) -> None:
 
 async def on_satellite_status(status: dict) -> None:
     await broadcast_json(satellite_clients, status)
+
+
+async def on_meteor_status(msg: dict) -> None:
+    await broadcast_json(meteor_clients, msg)
+
+
+async def on_meteor_image(msg: dict) -> None:
+    await broadcast_json(meteor_clients, msg)
 
 
 async def on_aprs_packet(msg: dict) -> None:
@@ -617,6 +636,8 @@ async def lifespan(app: FastAPI):
         await _mode_aprs.stop()
     if _mode_ax25 is not None:
         await _mode_ax25.stop()
+    if _mode_meteor is not None:
+        await _mode_meteor.stop()
     if airband is not None:
         await airband.stop()
     if adsb_decoder is not None:
@@ -784,6 +805,10 @@ def _cur_aprs() -> Optional[APRSDecoder]:
     return _mode_aprs if active_sdr_mode == "aprs" else None
 
 
+def _cur_meteor() -> Optional[MeteorDecoder]:
+    return _mode_meteor if active_sdr_mode == "meteor" else None
+
+
 def _cur_ax25() -> Optional[AX25Decoder]:
     return _mode_ax25 if active_sdr_mode == "aprs" else None
 
@@ -795,9 +820,9 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25
+    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor
 
-    VALID = ("dmr", "airband", "adsb", "sstv", "aprs")
+    VALID = ("dmr", "airband", "adsb", "sstv", "aprs", "meteor")
     if mode not in VALID:
         raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
     if mode == active_sdr_mode:
@@ -824,6 +849,11 @@ async def api_set_sdr_mode(mode: str):
         if _mode_adsb is not None:
             await _mode_adsb.stop()
             _mode_adsb = None
+
+    elif active_sdr_mode == "meteor":
+        if _mode_meteor is not None:
+            await _mode_meteor.stop()
+            _mode_meteor = None
 
     elif active_sdr_mode == "sstv":
         if sdr_task is not None and not sdr_task.done():
@@ -881,6 +911,20 @@ async def api_set_sdr_mode(mode: str):
             )
             await _mode_adsb.start()
 
+        elif mode == "meteor":
+            # SatDump owns device 0 directly (rtl_tcp already stopped above).
+            _mode_meteor = MeteorDecoder(
+                image_dir=METEOR_IMAGE_DIR,
+                freq=METEOR_FREQ,
+                samplerate=METEOR_SR,
+                gain=METEOR_GAIN,
+                pipeline=METEOR_PIPELINE,
+                rtl_dev=sdr.device_index if isinstance(sdr.device_index, int) else 0,
+                status_callback=on_meteor_status,
+                image_callback=on_meteor_image,
+            )
+            await _mode_meteor.start()
+
         elif mode == "sstv":
             # If a satellite is already tracked, centre on its downlink so the
             # Doppler follower in sstv_loop has the signal in the passband.
@@ -914,6 +958,7 @@ async def api_set_sdr_mode(mode: str):
         _mode_sstv    = None
         _mode_aprs    = None
         _mode_ax25    = None
+        _mode_meteor  = None
         try:
             sdr.freq = INITIAL_FREQ
             sdr.gain = INITIAL_GAIN
@@ -1298,6 +1343,77 @@ async def api_sat_tle_refresh():
         raise HTTPException(status_code=503, detail="satellite tracker unavailable")
     ok = await asyncio.get_running_loop().run_in_executor(None, sat_tracker.refresh_tles, True)
     return {"ok": ok, "sats_loaded": len(sat_tracker._sats)}
+
+
+@app.get("/api/sat/meteor")
+async def api_sat_meteor():
+    if sat_tracker is None:
+        return {"qth": {"grid": QTH_GRID}, "satellites": []}
+    info = await asyncio.get_running_loop().run_in_executor(
+        None, sat_tracker.info, sat_tracker.meteor_sats)
+    return {"qth": sat_tracker.status(), "satellites": info}
+
+
+# ---------------------------------------------------------------------------
+# METEOR LRPT (SatDump) WebSocket + REST endpoints
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/meteor")
+async def ws_meteor(websocket: WebSocket):
+    await websocket.accept()
+    meteor_clients.add(websocket)
+    logger.info("METEOR client connected — total=%d", len(meteor_clients))
+    try:
+        cur = _cur_meteor()
+        if cur:
+            await websocket.send_text(json.dumps(cur.status_dict()))
+    except Exception:
+        pass
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in METEOR WebSocket handler")
+    finally:
+        meteor_clients.discard(websocket)
+        logger.info("METEOR client disconnected — total=%d", len(meteor_clients))
+
+
+@app.get("/api/meteor/status")
+async def api_meteor_status():
+    cur = _cur_meteor()
+    if cur:
+        return cur.status_dict()
+    return {"type": "status", "running": False, "freq": METEOR_FREQ,
+            "pipeline": METEOR_PIPELINE, "snr": 0.0, "images": 0, "last_log": ""}
+
+
+@app.get("/api/meteor/images")
+async def api_meteor_images():
+    try:
+        rels = []
+        for root, _, files in os.walk(METEOR_IMAGE_DIR):
+            for f in files:
+                if f.lower().endswith(".png"):
+                    rels.append(os.path.relpath(os.path.join(root, f), METEOR_IMAGE_DIR))
+        rels.sort(reverse=True)
+        return [{"path": r, "url": f"/api/meteor/images/{r}"} for r in rels]
+    except FileNotFoundError:
+        return []
+
+
+@app.get("/api/meteor/images/{path:path}")
+async def api_meteor_image(path: str):
+    from fastapi.responses import FileResponse
+    base = os.path.realpath(METEOR_IMAGE_DIR)
+    full = os.path.realpath(os.path.join(base, path))
+    if not full.startswith(base + os.sep) or not full.lower().endswith(".png"):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=404)
+    return FileResponse(full, media_type="image/png")
 
 
 # ---------------------------------------------------------------------------

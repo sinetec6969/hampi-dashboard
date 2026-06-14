@@ -86,6 +86,16 @@ const MODES: ModeCard[] = [
     color: '#ff8800',
   },
   {
+    path: '/meteor',
+    icon: '🌍',
+    title: 'METEOR LRPT',
+    subtitle: '137 MHz Weather',
+    description: 'Decode METEOR-M2 LRPT weather imagery (137.9 MHz QPSK) via SatDump. MSU-MR visible/IR composites, Doppler-tracked, with pass prediction. Uses device 0 exclusively — switch SDR mode to catch a pass.',
+    status: 'live',
+    color: '#33bb88',
+    hardware: 'RTL-SDR + satdump',
+  },
+  {
     path: '/satellite',
     icon: '🛰️',
     title: 'Satellite Telemetry',
@@ -99,7 +109,7 @@ const MODES: ModeCard[] = [
 
 export default function Home() {
   const [info, setInfo] = useState<SysInfo | null>(null)
-  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | null>(null)
+  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | null>(null)
   const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
 
@@ -108,7 +118,7 @@ export default function Home() {
     fetch('/api/sdr/mode').then(r => r.json()).then(d => setSdrMode(d.mode)).catch(() => {})
   }, [])
 
-  async function switchMode(mode: 'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs') {
+  async function switchMode(mode: 'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor') {
     if (mode === sdrMode || switching) return
     setSwitching(true)
     try {
@@ -188,6 +198,13 @@ export default function Home() {
               disabled={switching}
             >
               APRS
+            </button>
+            <button
+              className={'sdr-mode-btn' + (sdrMode === 'meteor' ? ' sdr-mode-active' : '')}
+              onClick={() => switchMode('meteor')}
+              disabled={switching}
+            >
+              METEOR
             </button>
           </div>
           {switching && <span className="sdr-mode-switching">switching…</span>}

@@ -20,3 +20,5 @@ config.yaml
 aircraft.db
 radioid.db
 tle_amsat.txt
+meteor_images/
+tle_cache.txt
