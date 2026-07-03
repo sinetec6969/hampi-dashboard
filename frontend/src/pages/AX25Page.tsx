@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useEffect, useRef, useState } from 'react'
 import Waterfall from '../components/Waterfall'
 import Controls from '../components/Controls'
@@ -45,7 +46,7 @@ export default function AX25Page() {
     let alive = true
     let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
-      const ws = new WebSocket(`ws://${location.host}/ws/ax25`)
+      const ws = new WebSocket(wsUrl('/ws/ax25'))
       wsRef.current = ws
       ws.onclose = () => { setKissUp(false); if (alive) retry = setTimeout(connect, 3000) }
       ws.onerror = () => console.error('AX25 WS error')

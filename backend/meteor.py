@@ -53,6 +53,8 @@ class MeteorDecoder:
 
         self.snr        = 0.0
         self.last_log   = ""
+        self._image_count = 0
+        self._last_status_t = 0.0
         self._seen: set[str] = set()
         self._proc:  Optional[asyncio.subprocess.Process] = None
         self._rtl:   Optional[asyncio.subprocess.Process] = None
@@ -74,6 +76,7 @@ class MeteorDecoder:
     async def start(self) -> None:
         os.makedirs(self.image_dir, exist_ok=True)
         self._seen = set(self._scan())  # don't re-announce existing images
+        self._image_count = len(self._seen)
 
         # Dedicated rtl_tcp — satdump's rtltcp source will be its only client and
         # will command frequency / gain / samplerate. The previous owner's USB
@@ -155,7 +158,7 @@ class MeteorDecoder:
             "freq":     self.freq,
             "pipeline": self.pipeline,
             "snr":      round(self.snr, 1),
-            "images":   len(self._scan()),
+            "images":   self._image_count,
             "last_log": self.last_log,
         }
 
@@ -179,7 +182,10 @@ class MeteorDecoder:
                         self.snr = float(m.group(1))
                     except ValueError:
                         pass
-                if self._status_cb:
+                # SatDump logs are chatty during a pass — cap broadcasts at 2/s
+                now = asyncio.get_running_loop().time()
+                if self._status_cb and now - self._last_status_t > 0.5:
+                    self._last_status_t = now
                     await self._status_cb(self.status_dict())
         except asyncio.CancelledError:
             raise
@@ -190,7 +196,9 @@ class MeteorDecoder:
         try:
             while self._active:
                 await asyncio.sleep(2.0)
-                for rel in self._scan():
+                found = self._scan()
+                self._image_count = len(found)
+                for rel in found:
                     if rel not in self._seen:
                         self._seen.add(rel)
                         logger.info("METEOR image: %s", rel)
@@ -208,6 +216,7 @@ if __name__ == "__main__":
     open(os.path.join(d, "MSU-MR", "rgb.png"), "wb").close()
     md = MeteorDecoder(d, freq=137_900_000)
     assert md._scan() == ["MSU-MR/rgb.png"], md._scan()
+    md._image_count = len(md._scan())
     s = md.status_dict()
     assert s["images"] == 1 and s["freq"] == 137_900_000 and s["pipeline"] == "meteor_m2_lrpt"
     assert _SNR_RE.search("(I) Demod SNR : 12.4 dB Peak").group(1) == "12.4"

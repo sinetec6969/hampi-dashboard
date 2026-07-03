@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useEffect, useRef, useState } from 'react'
 
 interface DMRFrame {
@@ -39,7 +40,7 @@ export default function DMRPanel() {
     let alive = true
     let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
-      const ws = new WebSocket(`ws://${location.host}/ws/dmr`)
+      const ws = new WebSocket(wsUrl('/ws/dmr'))
       wsRef.current = ws
 
       ws.onmessage = e => {

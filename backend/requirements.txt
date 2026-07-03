@@ -2,7 +2,6 @@ fastapi
 uvicorn[standard]
 numpy
 scipy
-faster-whisper
 httpx
 meshtastic
 pyModeS
@@ -11,3 +10,4 @@ pillow
 pyyaml
 aprslib
 skyfield
+pyserial

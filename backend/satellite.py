@@ -77,7 +77,7 @@ class SatelliteMonitor:
     # ── MQTT thread ────────────────────────────────────────────────────────────
 
     def _mqtt_thread(self) -> None:
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.on_connect    = self._on_connect
         client.on_disconnect = self._on_disconnect
         client.on_message    = self._on_message
@@ -92,18 +92,18 @@ class SatelliteMonitor:
                 if self._running:
                     time.sleep(RECONNECT_DELAY)
 
-    def _on_connect(self, client, userdata, flags, rc) -> None:
-        if rc == 0:
+    def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
+        if not reason_code.is_failure:
             self.mqtt_connected = True
             client.subscribe("tinygs/#")
             logger.info("MQTT connected, subscribed tinygs/#")
             self._fire(self._status_cb({"type": "mqtt_connected"}))
         else:
-            logger.warning("MQTT connect refused rc=%d", rc)
+            logger.warning("MQTT connect refused rc=%s", reason_code)
 
-    def _on_disconnect(self, client, userdata, rc) -> None:
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties) -> None:
         self.mqtt_connected = False
-        logger.info("MQTT disconnected rc=%d", rc)
+        logger.info("MQTT disconnected rc=%s", reason_code)
         self._fire(self._status_cb({"type": "mqtt_disconnected"}))
 
     def _on_message(self, client, userdata, msg) -> None:

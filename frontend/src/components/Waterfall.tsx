@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useEffect, useRef } from 'react'
 
 interface Props {
@@ -54,7 +55,7 @@ export default function Waterfall({ centerFreqHz, onClickTune }: Props) {
     let alive = true
     let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
-      const ws = new WebSocket(`ws://${location.host}/ws/waterfall`)
+      const ws = new WebSocket(wsUrl('/ws/waterfall'))
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
       ws.onmessage = e => { rowBuf.current.push(new Float32Array(e.data)) }

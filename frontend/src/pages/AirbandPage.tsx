@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import AudioPlayer from '../components/AudioPlayer'
 
@@ -42,7 +43,7 @@ export default function AirbandPage() {
   // WebSocket for status updates
   // -----------------------------------------------------------------------
   const connectWs = useCallback(() => {
-    const ws = new WebSocket(`ws://${location.host}/ws/airband`)
+    const ws = new WebSocket(wsUrl('/ws/airband'))
     wsRef.current = ws
 
     ws.onmessage = e => {

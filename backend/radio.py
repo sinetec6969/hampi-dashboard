@@ -15,6 +15,7 @@ and tone helpers exist for bring-up / deviation calibration; real modes
 
 import logging
 import subprocess
+import threading
 import time
 from typing import Optional
 
@@ -37,6 +38,8 @@ class RadioInterface:
         self.tx_enable    = tx_enable
         self.callsign     = (callsign or "").strip().upper()
         self._ser: Optional[serial.Serial] = None
+        # TX methods run in thread-pool executors — serialize PTT access
+        self._tx_lock = threading.Lock()
 
     def start(self) -> None:
         # Open then immediately deassert RTS — a sub-ms blip at most, never a key.
@@ -75,25 +78,28 @@ class RadioInterface:
     def ptt_test(self, seconds: float = 1.0) -> None:
         """Key an unmodulated carrier briefly — confirms PTT wiring only."""
         self._guard()
-        self._ser.rts = True
-        try:
-            time.sleep(seconds)
-        finally:
-            self._ser.rts = False
+        with self._tx_lock:
+            self._ser.rts = True
+            try:
+                time.sleep(seconds)
+            finally:
+                self._ser.rts = False
 
     def transmit_tone(self, freq: int = 1000, seconds: float = 2.0) -> None:
         """Key + emit a sine tone out the Digirig — deviation calibration."""
         self._guard()
         pcm = _sine(freq, seconds)
-        self._ser.rts = True
-        try:
-            subprocess.run(
-                ["aplay", "-D", self.audio_device, "-f", "S16_LE",
-                 "-r", "48000", "-c", "1", "-q", "-"],
-                input=pcm, check=True,
-            )
-        finally:
-            self._ser.rts = False
+        with self._tx_lock:
+            self._ser.rts = True
+            try:
+                # timeout: a hung aplay must never leave the radio keyed
+                subprocess.run(
+                    ["aplay", "-D", self.audio_device, "-f", "S16_LE",
+                     "-r", "48000", "-c", "1", "-q", "-"],
+                    input=pcm, check=True, timeout=seconds + 2.0,
+                )
+            finally:
+                self._ser.rts = False
 
     def status(self) -> dict:
         return {

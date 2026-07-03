@@ -28,7 +28,6 @@ import numpy as np
 import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
@@ -140,6 +139,10 @@ METEOR_PIPELINE: str   = os.getenv("METEOR_PIPELINE", cfg("meteor.pipeline", "me
 METEOR_IMAGE_DIR: str  = os.getenv("METEOR_IMAGE_DIR", cfg("meteor.image_dir",
     os.path.join(os.path.dirname(__file__), "..", "meteor_images")))
 
+# City→coords geocoding for the DMR caller map hits nominatim.openstreetmap.org —
+# who you're hearing leaves the LAN. Off unless explicitly enabled.
+GEOCODE_ENABLE: bool = cfg_bool("GEOCODE_ENABLE", "geocode.enable", 0)
+
 # DMR talkgroup aliases (config.yaml `talkgroups:` map) + offline RadioID DB
 TALKGROUPS: dict[int, str] = {int(k): str(v) for k, v in (cfg("talkgroups", None) or {}).items()}
 
@@ -171,6 +174,7 @@ _mode_airband: Optional[AirbandScanner]   = None  # mode-switched airband on dev
 _mode_adsb:    Optional[ADSBDecoder]      = None  # mode-switched ADS-B on device 0
 active_sdr_mode: str                      = "dmr"
 sdr_task: Optional[asyncio.Task]          = None
+_mode_lock = asyncio.Lock()  # serializes /api/sdr/mode — device 0 has one owner
 
 waterfall_clients:  Set[WebSocket] = set()
 dmr_clients:        Set[WebSocket] = set()
@@ -225,13 +229,19 @@ def _save_history() -> None:
 # Broadcast helpers
 # ---------------------------------------------------------------------------
 
+# A client that can't take a frame in 500 ms is dead for a realtime stream —
+# evict it rather than let its TCP backpressure stall the SDR loop (pages
+# auto-reconnect).
+SEND_TIMEOUT = 0.5
+
+
 async def broadcast_bytes(clients: Set[WebSocket], data: bytes) -> None:
-    """Send binary data to all connected clients; evict dead connections."""
+    """Send binary data to all connected clients; evict dead/stalled connections."""
     dead: Set[WebSocket] = set()
     for ws in list(clients):
         try:
             if ws.client_state == WebSocketState.CONNECTED:
-                await ws.send_bytes(data)
+                await asyncio.wait_for(ws.send_bytes(data), SEND_TIMEOUT)
             else:
                 dead.add(ws)
         except Exception:
@@ -240,13 +250,13 @@ async def broadcast_bytes(clients: Set[WebSocket], data: bytes) -> None:
 
 
 async def broadcast_json(clients: Set[WebSocket], payload: dict) -> None:
-    """Send a JSON message to all connected clients; evict dead connections."""
+    """Send a JSON message to all connected clients; evict dead/stalled connections."""
     text = json.dumps(payload)
     dead: Set[WebSocket] = set()
     for ws in list(clients):
         try:
             if ws.client_state == WebSocketState.CONNECTED:
-                await ws.send_text(text)
+                await asyncio.wait_for(ws.send_text(text), SEND_TIMEOUT)
             else:
                 dead.add(ws)
         except Exception:
@@ -657,14 +667,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="HamPi SDR Dashboard", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 # ---------------------------------------------------------------------------
 # WebSocket endpoints
@@ -820,11 +822,16 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor
-
     VALID = ("dmr", "airband", "adsb", "sstv", "aprs", "meteor")
     if mode not in VALID:
         raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
+    async with _mode_lock:
+        return await _switch_sdr_mode(mode)
+
+
+async def _switch_sdr_mode(mode: str):
+    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor
+
     if mode == active_sdr_mode:
         return {"mode": active_sdr_mode}
 
@@ -953,6 +960,15 @@ async def api_set_sdr_mode(mode: str):
 
     except Exception as exc:
         logger.error("Mode switch to %r failed: %s — restoring DMR", mode, exc)
+        # Stop anything partially started — a leaked subprocess keeps device 0
+        # busy and the DMR fallback below would fail too.
+        for obj in (_mode_airband, _mode_adsb, _mode_sstv, _mode_aprs,
+                    _mode_ax25, _mode_meteor):
+            if obj is not None:
+                try:
+                    await obj.stop()
+                except Exception:
+                    logger.exception("cleanup stop failed during mode-switch recovery")
         _mode_airband = None
         _mode_adsb    = None
         _mode_sstv    = None
@@ -960,6 +976,7 @@ async def api_set_sdr_mode(mode: str):
         _mode_ax25    = None
         _mode_meteor  = None
         try:
+            await loop.run_in_executor(None, sdr.stop)  # in case the failed mode left it running
             sdr.freq = INITIAL_FREQ
             sdr.gain = INITIAL_GAIN
             await loop.run_in_executor(None, sdr.start)
@@ -976,7 +993,7 @@ async def api_set_sdr_mode(mode: str):
 
 async def _geocode(city: str, state: str, country: str) -> tuple[float, float] | None:
     """Resolve city+state to lat/lon via Nominatim OSM. Cached permanently."""
-    if not city:
+    if not GEOCODE_ENABLE or not city:
         return None
     key = f"{city}|{state}|{country}".lower()
     if key in _geo_cache:
@@ -1105,7 +1122,7 @@ async def api_airband_channel(idx: int):
         raise HTTPException(status_code=400, detail="Invalid channel index")
     ab.set_scanner(False)
     airband_status["scanner_on"] = False
-    asyncio.create_task(ab._tune_to(idx))
+    await ab._tune_to(idx)
     return {"active_idx": idx, "channel": ab.channels[idx]}
 
 
@@ -1281,10 +1298,9 @@ async def api_sstv_status():
 
 @app.get("/api/sstv/images")
 async def api_sstv_images():
-    image_dir = os.path.join(os.path.dirname(__file__), "..", "sstv_images")
     try:
         files = sorted(
-            [f for f in os.listdir(image_dir) if f.endswith(".png")],
+            [f for f in os.listdir(SSTV_IMAGE_DIR) if f.endswith(".png")],
             reverse=True,
         )
         return [{"filename": f, "url": f"/api/sstv/images/{f}"} for f in files]
@@ -1297,7 +1313,7 @@ async def api_sstv_image(filename: str):
     from fastapi.responses import FileResponse
     if not filename.endswith(".png") or "/" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
-    path = os.path.join(os.path.dirname(__file__), "..", "sstv_images", filename)
+    path = os.path.join(SSTV_IMAGE_DIR, filename)
     if not os.path.isfile(path):
         raise HTTPException(status_code=404)
     return FileResponse(path, media_type="image/png")

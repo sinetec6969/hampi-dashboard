@@ -72,6 +72,11 @@ satellite:
   mqtt_host: localhost
   mqtt_port: 1883
 
+# DMR caller-map geocoding queries nominatim.openstreetmap.org — city/state of
+# heard callers leaves the LAN. Off by default; caller map shows no pins without it.
+geocode:
+  enable: false
+
 talkgroups:               # DMR talkgroup aliases — shown next to TG numbers
   91: "Worldwide"
   93: "North America"

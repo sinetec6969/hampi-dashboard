@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useEffect, useRef, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -118,7 +119,7 @@ export default function APRSPage() {
     let alive = true
     let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
-      const ws = new WebSocket(`ws://${location.host}/ws/aprs`)
+      const ws = new WebSocket(wsUrl('/ws/aprs'))
       wsRef.current = ws
       ws.onopen  = () => setConnected(true)
       ws.onclose = () => { setConnected(false); if (alive) retry = setTimeout(connect, 3000) }

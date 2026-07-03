@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import SatPanel from '../components/SatPanel'
 
@@ -92,7 +93,7 @@ export default function SSTVPage() {
   // ── WebSocket ─────────────────────────────────────────────────────
 
   const connect = useCallback(() => {
-    const ws = new WebSocket(`ws://${location.host}/ws/sstv`)
+    const ws = new WebSocket(wsUrl('/ws/sstv'))
     wsRef.current = ws
 
     ws.onmessage = e => {

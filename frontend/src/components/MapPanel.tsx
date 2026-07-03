@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useEffect, useRef, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
@@ -34,7 +35,7 @@ export default function MapPanel() {
     let alive = true
     let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
-      const ws = new WebSocket(`ws://${location.host}/ws/dmr`)
+      const ws = new WebSocket(wsUrl('/ws/dmr'))
       wsRef.current = ws
 
       ws.onmessage = e => {

@@ -123,8 +123,14 @@ export default function Home() {
     setSwitching(true)
     try {
       const r = await fetch(`/api/sdr/mode?mode=${mode}`, { method: 'POST' })
-      const d = await r.json()
-      setSdrMode(d.mode)
+      if (r.ok) {
+        const d = await r.json()
+        setSdrMode(d.mode)
+      } else {
+        // switch failed — backend fell back to DMR; re-read actual mode
+        const cur = await fetch('/api/sdr/mode').then(res => res.json())
+        setSdrMode(cur.mode)
+      }
     } catch {}
     setSwitching(false)
   }

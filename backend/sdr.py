@@ -52,6 +52,21 @@ class SDREngine:
         # FM demodulation state
         self._prev_sample: complex = 0 + 0j
         self._decim_ratio = self.sample_rate // 48_000  # 50
+        self._shift_phase = 0.0  # carries the mixer phase across chunks
+
+        # Two-stage anti-alias decimation, 2.4 MHz → 240 kHz → 48 kHz (10 × 5).
+        # Stride-only decimation folds the entire 2.4 MHz window onto the
+        # channel — any strong off-channel signal lands on top of the wanted
+        # one before the discriminator, where no audio filter can remove it.
+        # ~13 ms/chunk on a Pi 5 (54 ms budget), verified -68 dB at +500 kHz.
+        self._dec1, self._dec2 = 10, self._decim_ratio // 10
+        self._lpf1 = firwin(numtaps=33, cutoff=100_000, fs=self.sample_rate).astype(np.float32)
+        self._lpf2 = firwin(numtaps=63, cutoff=20_000,
+                            fs=self.sample_rate // self._dec1).astype(np.float32)
+        self._fm_dec_zi = [np.zeros(len(self._lpf1) - 1, dtype=np.complex64),
+                           np.zeros(len(self._lpf2) - 1, dtype=np.complex64)]
+        self._am_dec_zi = [np.zeros(len(self._lpf1) - 1, dtype=np.complex64),
+                           np.zeros(len(self._lpf2) - 1, dtype=np.complex64)]
 
         # FM audio LPF applied AFTER decimation at 48 kHz.
         # At 48 kHz a 64-tap Hamming FIR gives -72 dB at 12.5 kHz (adjacent DMR
@@ -65,6 +80,13 @@ class SDREngine:
         self._am_lpf    = firwin(numtaps=64, cutoff=3_500, fs=48_000,
                                   window="hamming").astype(np.float32)
         self._am_lpf_zi = np.zeros(len(self._am_lpf) - 1, dtype=np.float32)
+
+    def _decimate(self, iq: np.ndarray, zi: list) -> np.ndarray:
+        """Filtered 50:1 decimation to 48 kHz; zi carries state across chunks."""
+        x, zi[0] = lfilter(self._lpf1, [1.0], iq, zi=zi[0])
+        x = x[::self._dec1]
+        x, zi[1] = lfilter(self._lpf2, [1.0], x, zi=zi[1])
+        return x[::self._dec2].astype(np.complex64)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -216,11 +238,11 @@ class SDREngine:
         Demodulate FM from IQ samples centred at self.freq.
 
         Steps:
-          1. Frequency-shift to move target_freq to baseband.
-          1. Frequency shift so target_freq lands at DC (skipped if already there).
-          2. Decimate IQ from 2.4 MHz to 48 kHz (factor 50, no pre-filter needed —
-             adjacent channels land at ≥12.5 kHz in the 48 kHz domain where the
-             audio LPF rejects them at −72 dB).
+          1. Frequency shift so target_freq lands at DC (skipped if already
+             there). Mixer phase carries across chunks — a phase jump at the
+             boundary would click through the discriminator every chunk.
+          2. Two-stage filtered decimation 2.4 MHz → 48 kHz (channel selection
+             happens here, before the discriminator).
           3. FM discriminator: instantaneous phase via conjugate product.
           4. Low-pass filter at 48 kHz — 64-tap Hamming FIR, 6 kHz cutoff.
              Stateful (lfilter + zi) so there is no transient at chunk boundaries.
@@ -235,17 +257,20 @@ class SDREngine:
         """
         n = len(iq)
 
-        # 1. Frequency shift so target_freq lands at DC
+        # 1. Frequency shift so target_freq lands at DC — phase-continuous
+        # across chunks (float64: the phase argument gets large fast)
         freq_offset = target_freq - self.freq
         if freq_offset != 0:
-            t = np.arange(n, dtype=np.float32) / self.sample_rate
-            shift = np.exp(-2j * np.pi * freq_offset * t).astype(np.complex64)
-            iq = iq * shift
+            t = np.arange(n, dtype=np.float64) / self.sample_rate
+            shift = np.exp(-1j * (2 * np.pi * freq_offset * t + self._shift_phase))
+            iq = (iq * shift).astype(np.complex64)
+            self._shift_phase = (self._shift_phase
+                                 + 2 * np.pi * freq_offset * n / self.sample_rate) % (2 * np.pi)
+        else:
+            self._shift_phase = 0.0
 
-        # 2. Decimate IQ to 48 kHz — simple stride, no pre-filter.
-        # Adjacent DMR channels (±12.5 kHz) survive decimation at 12.5 kHz in the
-        # 48 kHz domain and are removed by the audio LPF in step 4.
-        decimated = iq[:: self._decim_ratio]
+        # 2. Filtered decimation to 48 kHz (channel selection)
+        decimated = self._decimate(iq, self._fm_dec_zi)
 
         # 3. FM discriminator: angle(x[n] · conj(x[n-1])) = instantaneous freq
         prev = np.empty_like(decimated)
@@ -276,7 +301,7 @@ class SDREngine:
 
         Steps:
           1. Frequency-shift target_freq to DC (skipped if already there).
-          2. Decimate IQ from 2.4 MHz to 48 kHz (factor 50).
+          2. Two-stage filtered decimation 2.4 MHz → 48 kHz (channel selection).
           3. Envelope detection: abs() of complex baseband signal.
           4. Low-pass filter at 3.5 kHz — 64-tap Hamming FIR for voice bandwidth.
              Stateful (lfilter + zi) across chunk boundaries.
@@ -295,15 +320,16 @@ class SDREngine:
         """
         n = len(iq)
 
-        # 1. Frequency shift so target_freq lands at DC
+        # 1. Frequency shift so target_freq lands at DC (envelope detection is
+        # phase-invariant — no cross-chunk phase continuity needed here)
         freq_offset = target_freq - self.freq
         if freq_offset != 0:
-            t = np.arange(n, dtype=np.float32) / self.sample_rate
-            shift = np.exp(-2j * np.pi * freq_offset * t).astype(np.complex64)
-            iq = iq * shift
+            t = np.arange(n, dtype=np.float64) / self.sample_rate
+            shift = np.exp(-2j * np.pi * freq_offset * t)
+            iq = (iq * shift).astype(np.complex64)
 
-        # 2. Decimate to 48 kHz
-        decimated = iq[::self._decim_ratio]
+        # 2. Filtered decimation to 48 kHz (channel selection)
+        decimated = self._decimate(iq, self._am_dec_zi)
 
         # 3. AM envelope detection
         envelope = np.abs(decimated).astype(np.float32)

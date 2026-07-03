@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useEffect, useRef, useState, useCallback } from 'react'
 
 interface Status {
@@ -47,7 +48,7 @@ export default function MeteorPage() {
     let alive = true
     let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
-      const ws = new WebSocket(`ws://${location.host}/ws/meteor`)
+      const ws = new WebSocket(wsUrl('/ws/meteor'))
       wsRef.current = ws
       ws.onclose = () => { if (alive) retry = setTimeout(connect, 3000) }
       ws.onerror = () => console.error('METEOR WS error')

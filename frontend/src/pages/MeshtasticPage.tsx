@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -144,7 +145,7 @@ export default function MeshtasticPage() {
   // ── WebSocket ─────────────────────────────────────────────────────────
 
   const connectWs = useCallback(() => {
-    const ws = new WebSocket(`ws://${location.host}/ws/meshtastic`)
+    const ws = new WebSocket(wsUrl('/ws/meshtastic'))
     wsRef.current = ws
 
     ws.onmessage = e => {

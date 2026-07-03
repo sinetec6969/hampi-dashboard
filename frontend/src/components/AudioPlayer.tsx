@@ -1,3 +1,4 @@
+import { wsUrl } from '../ws'
 import { useRef, useState } from 'react'
 
 type Status = 'stopped' | 'connecting' | 'streaming'
@@ -34,7 +35,7 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
 
     const ratio = ctx.sampleRate / inputRate
 
-    const ws = new WebSocket(`ws://${location.host}${wsPath}`)
+    const ws = new WebSocket(wsUrl(wsPath))
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
 
@@ -67,7 +68,7 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
     // causes the buffer to play at the wrong duty cycle (sounds like slomo).
     const ratio = ctx.sampleRate / inputRate
 
-    const ws = new WebSocket(`ws://${location.host}${wsPath}`)
+    const ws = new WebSocket(wsUrl(wsPath))
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
 

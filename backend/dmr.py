@@ -118,12 +118,13 @@ class DMRDecoder:
         self._active_cc     = 0
         self._pending_ftype = "UNKNOWN"
 
-        # Call tracking state (for history log)
-        self._recording:         bool             = False
-        self._active_call:       Optional[dict]   = None
-        self._last_voice_ts:     float            = 0.0
-        # Set by _clear_call (sync); drained by _read_stderr (async)
-        self._pending_finalize:  Optional[dict]   = None
+        # Call tracking state (for history log) — per-slot: TS1 and TS2 calls
+        # interleave on a BS-mode repeater and must not clobber each other
+        self._recording:     dict[int, bool]           = {1: False, 2: False}
+        self._active_call:   dict[int, Optional[dict]] = {1: None, 2: None}
+        self._last_voice_ts: dict[int, float]          = {1: 0.0, 2: 0.0}
+        # Appended by _clear_call (sync); drained by _read_stderr (async)
+        self._pending_finalize: list[dict] = []
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -187,8 +188,6 @@ class DMRDecoder:
         if self._proc is None or self._proc.stderr is None:
             return
 
-        _dbg = open("/tmp/dsd_stderr.log", "w", buffering=1)
-        _lines = 0
         try:
             while True:
                 line_bytes = await self._proc.stderr.readline()
@@ -196,14 +195,10 @@ class DMRDecoder:
                     logger.info("dsd-fme stderr closed")
                     break
                 line = line_bytes.decode("ascii", errors="replace")
-                _dbg.write(line)
-                _lines += 1
 
                 frame = self._parse_line(line)
-                if self._pending_finalize is not None:
-                    call_info            = self._pending_finalize
-                    self._pending_finalize = None
-                    await self._do_finalize(call_info)
+                while self._pending_finalize:
+                    await self._do_finalize(self._pending_finalize.pop(0))
                 if frame is not None:
                     try:
                         await self._meta_cb(frame.to_dict())
@@ -214,8 +209,7 @@ class DMRDecoder:
         except Exception:
             logger.exception("Unexpected error in dsd-fme stderr reader")
         finally:
-            logger.info("dsd-fme stderr reader done — lines=%d", _lines)
-            _dbg.close()
+            logger.info("dsd-fme stderr reader done")
 
     def _parse_line(self, raw: str) -> Optional[DMRFrame]:
         """
@@ -293,21 +287,21 @@ class DMRDecoder:
                     if len(alias) >= len(current):
                         self._slot_ctx[slot]["alias"] = alias
                         logger.info("Alias TS%d: %s", slot, alias)
-                        if (self._active_call and
-                                self._active_call.get("slot") == slot and
-                                len(alias) >= len(self._active_call.get("alias", ""))):
-                            self._active_call["alias"] = alias
+                        call = self._active_call.get(slot)
+                        if call and len(alias) >= len(call.get("alias", "")):
+                            call["alias"] = alias
             return None
 
         return None
 
     def _clear_call(self, slot: int) -> None:
         """Reset per-call fields on VLC (new call) or TLC (call terminator)."""
-        if self._recording and self._active_call:
-            self._active_call["end_time"] = self._last_voice_ts or time.time()
-            self._pending_finalize = dict(self._active_call)
-        self._recording   = False
-        self._active_call = None
+        if self._recording.get(slot) and self._active_call.get(slot):
+            call = self._active_call[slot]
+            call["end_time"] = self._last_voice_ts.get(slot) or time.time()
+            self._pending_finalize.append(dict(call))
+        self._recording[slot]   = False
+        self._active_call[slot] = None
         if slot in self._slot_ctx:
             ctx = self._slot_ctx[slot]
             ctx["src_id"] = 0
@@ -334,17 +328,17 @@ class DMRDecoder:
     def _maybe_start_recording(self, frame: "DMRFrame") -> None:
         if frame.frame_type != "VOICE" or frame.src_id == 0:
             return
-        self._last_voice_ts = time.time()
-        if not self._recording:
-            self._recording  = True
-            self._rec_start  = time.time()
-            self._active_call = {
+        slot = self._active_slot
+        self._last_voice_ts[slot] = time.time()
+        if not self._recording.get(slot):
+            self._recording[slot] = True
+            self._active_call[slot] = {
                 "src_id":     frame.src_id,
                 "dst_id":     frame.dst_id,
                 "group":      frame.group,
                 "alias":      frame.alias,
-                "slot":       self._active_slot,
-                "start_time": self._rec_start,
+                "slot":       slot,
+                "start_time": time.time(),
             }
 
     async def _do_finalize(self, call_info: dict) -> None:

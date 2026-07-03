@@ -27,6 +27,9 @@ except ImportError:
 
 SAMPLE_RATE = 48_000
 
+DECODE_STALL_S = 10.0   # no line progress for this long → abort the decode
+MIN_SAVE_LINES = 16     # keep a partial image if at least this many lines landed
+
 FREQ_SYNC   = 1200
 FREQ_BLACK  = 1500
 FREQ_WHITE  = 2300
@@ -135,6 +138,7 @@ class SSTVDecoder:
         self.total_lines: int            = 0
         self._signal_rms: float          = 0.0
         self._last_status_t: float       = 0.0
+        self._last_progress_t: float     = 0.0
 
         self._r: Optional[np.ndarray] = None
         self._g: Optional[np.ndarray] = None
@@ -213,6 +217,18 @@ class SSTVDecoder:
                 buf = buf[-MAX_BUF:]
 
             now = time.monotonic()
+
+            # Signal lost mid-image: SYNC_HUNT would otherwise scan forever and
+            # the partial image would be silently discarded.
+            if (self.state in (State.SYNC_HUNT, State.LINE_DECODE)
+                    and now - self._last_progress_t > DECODE_STALL_S):
+                logger.warning("SSTV decode stalled at line %d/%d — aborting",
+                               self.line_num, self.total_lines)
+                if self.line_num >= MIN_SAVE_LINES:
+                    await self._finish_image()
+                self.state     = State.IDLE
+                self.mode      = None
+                self.mode_name = ""
             if self._status_cb and (self.state != prev_state or now - self._last_status_t > 0.5):
                 self._last_status_t = now
                 asyncio.create_task(self._status_cb(self.status_dict()))
@@ -273,6 +289,7 @@ class SSTVDecoder:
                 self._cr_row  = None
                 self._cb_row  = None
             logger.info("SSTV mode: %s (%d × %d)", self.mode_name, w, h)
+            self._last_progress_t = time.monotonic()
             self.state = State.SYNC_HUNT
         else:
             logger.warning("Unknown VIS code %d — returning to IDLE", vis_code)
@@ -381,6 +398,7 @@ class SSTVDecoder:
             ))
 
         self.line_num += 1
+        self._last_progress_t = time.monotonic()
         if self.line_num >= self.total_lines:
             await self._finish_image()
             self.state     = State.IDLE
