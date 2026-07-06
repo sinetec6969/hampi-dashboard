@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 StatusCb = Callable[[dict], Awaitable[None]]
 ImageCb  = Callable[[dict], Awaitable[None]]
 
-_SNR_RE = re.compile(r"SNR\s*[:=]?\s*(-?\d+\.?\d*)\s*dB", re.IGNORECASE)
+_SNR_RE  = re.compile(r"SNR\s*[:=]?\s*(-?\d+\.?\d*)\s*dB", re.IGNORECASE)
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 class MeteorDecoder:
@@ -172,7 +173,7 @@ class MeteorDecoder:
                 if not line:
                     logger.warning("SatDump output closed")
                     break
-                txt = line.decode("utf-8", errors="replace").strip()
+                txt = _ANSI_RE.sub("", line.decode("utf-8", errors="replace")).strip()
                 if not txt:
                     continue
                 self.last_log = txt[-160:]
