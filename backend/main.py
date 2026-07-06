@@ -29,6 +29,7 @@ import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.websockets import WebSocketState
 
 from adsb import ADSBDecoder
@@ -1704,9 +1705,19 @@ async def api_satellite_packets():
 # Static frontend (must come last so API routes take precedence)
 # ---------------------------------------------------------------------------
 
+class SPAStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code == 404 and not path.startswith("api/"):
+                return await super().get_response("index.html", scope)
+            raise
+
+
 _dist = os.path.join(os.path.dirname(__file__), FRONTEND_DIST)
 if os.path.isdir(_dist):
-    app.mount("/", StaticFiles(directory=_dist, html=True), name="frontend")
+    app.mount("/", SPAStaticFiles(directory=_dist, html=True), name="frontend")
 else:
     logger.warning("Frontend dist directory not found at %s — skipping static mount", _dist)
 
