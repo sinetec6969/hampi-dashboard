@@ -79,12 +79,13 @@ export default function TrunkPage() {
       <div style={{ color: '#789', fontSize: 12 }}>{st?.site ?? 'Carolina Connect Site 004'} · Connect Plus (SDRTrunk)</div>
 
       {!active && (
-        <div style={{ padding: 10, background: '#10181f', border: '1px solid #3a7', color: '#7fd' }}>
-          Trunked DMR uses the RTL-SDR exclusively via SDRTrunk (control-channel tracking).
-          Starting it stops the dashboard's own SDR and hands device 0 to the SDRTrunk service.{' '}
+        <div className="mode-banner">
+          Trunked DMR hands device 0 to the SDRTrunk service (control-channel tracking needs
+          the dongle to itself). The dashboard's own SDR stops while it runs.{' '}
           <button className="btn" onClick={() => setSdrMode('trunk')} disabled={switching}>
             {switching ? 'switching…' : 'Switch to Trunk mode'}
           </button>
+          <div className="mode-banner-sub">Tuner lock takes about 20 seconds after the switch.</div>
         </div>
       )}
 
@@ -103,6 +104,7 @@ export default function TrunkPage() {
             {active ? 'Waiting for the control channel to grant a call…' : 'Switch to Trunk mode to begin decoding.'}
           </div>
         ) : (
+          <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: 'monospace' }}>
             <thead>
               <tr style={{ color: '#3a7', textAlign: 'left' }}>
@@ -121,6 +123,7 @@ export default function TrunkPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

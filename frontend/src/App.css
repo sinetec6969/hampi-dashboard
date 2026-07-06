@@ -1,5 +1,21 @@
+/* One palette. Green = alive, amber = degraded/starting, red = stopped/error.
+   Page accent colors (per-mode identity) stay, but status always reads the same. */
+:root {
+  --ok: #00ff88;
+  --warn: #ffaa33;
+  --err: #ff4444;
+  --bg: #0a0a0a;
+  --bg-panel: #111;
+  --bg-inset: #0d0d0d;
+  --line: #222;
+  --line-strong: #333;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --text-faint: #555;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospace; height: 100vh; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; height: 100vh; overflow: hidden; }
 #root { display: flex; flex-direction: column; height: 100vh; }
 
 /* ── App shell ──────────────────────────────────────────────── */
@@ -26,6 +42,25 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
 .app-nav-link.active { color: #00ff88; background: #0a1a12; }
 .app-content { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
+/* Nav SDR-mode pill — device 0's current owner, on every page */
+.sdr-pill {
+  margin-left: auto; display: flex; align-items: center; gap: 5px;
+  text-decoration: none; white-space: nowrap;
+  border: 1px solid #1e3a2c; border-radius: 10px; padding: 2px 9px;
+  background: #0a1a12;
+}
+.sdr-pill:hover { border-color: var(--ok); }
+.sdr-pill-label { font-size: 0.6rem; color: var(--text-faint); letter-spacing: 1px; }
+.sdr-pill-mode { font-size: 0.72rem; color: var(--ok); font-weight: bold; letter-spacing: 0.5px; }
+.sdr-pill-mode.off { color: var(--err); }
+
+/* Shared info banner — "this mode needs device 0" blocks on mode pages */
+.mode-banner {
+  padding: 10px; background: #10181f; border: 1px solid #3a7; color: #7fd;
+  font-size: 0.85rem; line-height: 1.6;
+}
+.mode-banner-sub { color: #789; font-size: 0.75rem; margin-top: 6px; }
+
 /* ── DMR dashboard ──────────────────────────────────────────── */
 .header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #111; border-bottom: 1px solid #333; flex-shrink: 0; }
 .header-title { font-size: 1.2rem; color: #00ff88; font-weight: bold; }
@@ -48,14 +83,17 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
 .sysinfo-val { color: #ccc; }
 .sysinfo-ts .sysinfo-val { color: #00ff88; }
 
-.sdr-mode-bar { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 28px; }
+.sdr-mode-block { margin-bottom: 28px; }
+.sdr-mode-bar { display: flex; align-items: center; gap: 12px; justify-content: center; }
 .sdr-mode-label { font-size: 0.68rem; color: #444; text-transform: uppercase; letter-spacing: 1px; }
-.sdr-mode-toggle { display: flex; background: #0d0d0d; border: 1px solid #222; border-radius: 6px; overflow: hidden; }
-.sdr-mode-btn { background: transparent; border: none; color: #555; font-family: inherit; font-size: 0.78rem; padding: 6px 18px; cursor: pointer; letter-spacing: 0.5px; transition: background 0.15s, color 0.15s; }
+.sdr-mode-toggle { display: flex; background: var(--bg-inset); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.sdr-mode-btn { background: transparent; border: none; color: var(--text-faint); font-family: inherit; font-size: 0.85rem; padding: 9px 20px; cursor: pointer; letter-spacing: 0.5px; transition: background 0.15s, color 0.15s; }
 .sdr-mode-btn:hover:not(:disabled) { background: #161616; color: #aaa; }
 .sdr-mode-btn:disabled { cursor: default; }
-.sdr-mode-active { background: #111 !important; color: #00ff88 !important; }
-.sdr-mode-switching { font-size: 0.68rem; color: #555; }
+.sdr-mode-active { background: #0a1f14 !important; color: var(--ok) !important; box-shadow: inset 0 -2px 0 var(--ok); }
+.sdr-mode-pending { color: var(--warn) !important; }
+.sdr-mode-note { text-align: center; font-size: 0.72rem; color: var(--warn); margin-top: 8px; }
+.sdr-mode-error { text-align: center; font-size: 0.75rem; color: var(--err); background: #1a0808; border: 1px solid #3a1010; border-radius: 4px; padding: 6px 12px; margin: 8px auto 0; max-width: 640px; line-height: 1.5; }
 
 .mode-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; max-width: 1200px; margin: 0 auto 32px; }
 .mode-card {
@@ -72,6 +110,7 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
 .mode-card-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; letter-spacing: 0.5px; }
 .badge-live { color: #00ff88; background: #0a2018; border: 1px solid #00ff8840; }
 .badge-soon { color: #555; background: #151515; border: 1px solid #2a2a2a; }
+.badge-active { color: #000; background: var(--ok); border: 1px solid var(--ok); font-weight: bold; }
 .mode-card-title { font-size: 1rem; color: #eee; font-weight: bold; margin-bottom: 2px; }
 .mode-card-sub { font-size: 0.72rem; color: #555; margin-bottom: 10px; letter-spacing: 0.5px; text-transform: uppercase; }
 .mode-card-desc { font-size: 0.78rem; color: #888; line-height: 1.6; margin-bottom: 10px; }
@@ -315,10 +354,16 @@ input[type=number], input[type=range] { background: #1a1a1a; color: #e0e0e0; bor
 
   /* Nav — let links scroll horizontally rather than overflow/clip */
   .app-nav { height: auto; min-height: 40px; flex-wrap: wrap; padding: 6px 10px; gap: 4px; }
-  .app-nav-brand { margin-right: auto; }
-  .app-nav-links { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .app-nav-brand { margin-right: 8px; }
+  .app-nav-links { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex: 1; min-width: 0; }
   .app-nav-links::-webkit-scrollbar { display: none; }
   .app-nav-link { padding: 4px 8px; font-size: 0.72rem; white-space: nowrap; }
+  .sdr-pill { margin-left: 4px; }
+
+  /* Mode switcher — 7 buttons need to wrap on a phone */
+  .sdr-mode-bar { flex-wrap: wrap; }
+  .sdr-mode-toggle { flex-wrap: wrap; justify-content: center; }
+  .sdr-mode-btn { padding: 8px 12px; font-size: 0.78rem; }
 
   /* Home */
   .home-page { padding: 20px 12px 32px; }

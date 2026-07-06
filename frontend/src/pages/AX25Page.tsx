@@ -111,8 +111,8 @@ export default function AX25Page() {
       </div>
 
       {!active && (
-        <div style={{ padding: 8, background: '#221a10', border: '1px solid #ff8844', color: '#ff8844' }}>
-          AX.25 rides the APRS-mode direwolf — SDR is in "{sdrMode || '…'}" mode.{' '}
+        <div className="mode-banner">
+          AX.25 rides the APRS-mode direwolf, and device 0 is in "{sdrMode || '…'}" mode right now.{' '}
           <button className="btn" onClick={enableAprsMode} disabled={switching}>
             {switching ? 'switching…' : 'Switch to APRS mode'}
           </button>

@@ -92,14 +92,14 @@ export default function MeteorPage() {
       </div>
 
       {!active && (
-        <div style={{ padding: 10, background: '#10181f', border: '1px solid #3a7', color: '#7fd' }}>
-          METEOR uses the RTL-SDR exclusively (QPSK, not FM). Start it to retune device 0 to{' '}
-          {((st?.freq ?? 137900000) / 1e6).toFixed(3)} MHz and run SatDump.{' '}
+        <div className="mode-banner">
+          METEOR needs device 0 to itself (QPSK via SatDump, not FM). Switching retunes to{' '}
+          {((st?.freq ?? 137900000) / 1e6).toFixed(3)} MHz and starts the decoder.{' '}
           <button className="btn" onClick={enableMeteor} disabled={switching}>
             {switching ? 'switching…' : 'Switch to METEOR mode'}
           </button>
-          <div style={{ color: '#789', fontSize: 12, marginTop: 6 }}>
-            Catch a pass — LRPT only transmits while the satellite is above the horizon.
+          <div className="mode-banner-sub">
+            Time it with a pass — LRPT only transmits while the satellite is above the horizon.
           </div>
         </div>
       )}

@@ -28,8 +28,8 @@ export default function Controls({ freq, gain, onFreqChange, onGainChange, onTun
       </label>
       <button className="btn" onClick={() => onTune(freq, gain)}>Tune</button>
       {msg && <span style={{ color: '#00ff88' }}>{msg}</span>}
-      <span style={{ color: '#555', fontSize: '0.7rem' }}>
-        WF:{clients.waterfall || 0} DMR:{clients.dmr || 0} AUD:{clients.audio || 0}
+      <span style={{ color: '#555', fontSize: '0.7rem' }} title="connected browsers: waterfall / DMR metadata">
+        WF:{clients.waterfall || 0} DMR:{clients.dmr || 0}
       </span>
     </div>
   )
