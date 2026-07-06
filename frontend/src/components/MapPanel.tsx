@@ -28,8 +28,14 @@ const pinIcon = L.divIcon({
 
 export default function MapPanel() {
   const [contacts, setContacts] = useState<MapContact[]>([])
+  const [geocodeOn, setGeocodeOn] = useState(true)
   const wsRef    = useRef<WebSocket | null>(null)
   const lookedUp = useRef<Set<number>>(new Set())
+
+  useEffect(() => {
+    fetch('/api/sysinfo').then(r => r.json())
+      .then(d => setGeocodeOn(d.geocode ?? true)).catch(() => {})
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -107,6 +113,19 @@ export default function MapPanel() {
       }}>
         {contacts.length > 0 && `${contacts.length} pinned`}
       </div>
+
+      {/* Empty map explains itself — usually it's the privacy default, not a bug */}
+      {contacts.length === 0 && !geocodeOn && (
+        <div style={{
+          position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 1000, background: '#111c', border: '1px solid #333', borderRadius: 4,
+          padding: '6px 12px', fontSize: '0.68rem', color: '#888', pointerEvents: 'none',
+          maxWidth: '90%', textAlign: 'center',
+        }}>
+          No pins: geocoding is off (the default — it sends heard callers' city/state to
+          OpenStreetMap). <code>geocode: enable: true</code> in config.yaml turns it on.
+        </div>
+      )}
 
       <MapContainer
         center={[30, -20]}
