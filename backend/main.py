@@ -38,6 +38,7 @@ from ax25 import AX25Decoder
 from radio import RadioInterface
 from satpredict import SatTracker
 from meteor import MeteorDecoder
+from sdrtrunk import TrunkMonitor
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
 from sdr import SDREngine
@@ -139,6 +140,15 @@ METEOR_PIPELINE: str   = os.getenv("METEOR_PIPELINE", cfg("meteor.pipeline", "me
 METEOR_IMAGE_DIR: str  = os.getenv("METEOR_IMAGE_DIR", cfg("meteor.image_dir",
     os.path.join(os.path.dirname(__file__), "..", "meteor_images")))
 
+# SDRTrunk trunked-DMR (Connect Plus) monitor — runs as the `sdrtrunk` systemd
+# user service; this mode just starts/stops it so the dashboard owns the dongle.
+TRUNK_APP_DIR:  str = os.getenv("TRUNK_APP_DIR", cfg("trunk.app_dir",
+    os.path.join(os.path.expanduser("~"), "SDRTrunk")))
+TRUNK_SERVICE:  str = os.getenv("TRUNK_SERVICE", cfg("trunk.service", "sdrtrunk"))
+TRUNK_SITE:     str = os.getenv("TRUNK_SITE",    cfg("trunk.site", "Carolina Connect Site 004"))
+TRUNK_CONTROL:  int = int(os.getenv("TRUNK_CONTROL", cfg("trunk.control_freq", 454031250)))
+TRUNK_VNC_URL:  str = os.getenv("TRUNK_VNC_URL",  cfg("trunk.vnc_url", ""))
+
 # City→coords geocoding for the DMR caller map hits nominatim.openstreetmap.org —
 # who you're hearing leaves the LAN. Off unless explicitly enabled.
 GEOCODE_ENABLE: bool = cfg_bool("GEOCODE_ENABLE", "geocode.enable", 0)
@@ -178,6 +188,7 @@ _mode_lock = asyncio.Lock()  # serializes /api/sdr/mode — device 0 has one own
 
 waterfall_clients:  Set[WebSocket] = set()
 dmr_clients:        Set[WebSocket] = set()
+dmr_audio_clients:  Set[WebSocket] = set()
 airband_clients:    Set[WebSocket] = set()
 meshtastic_clients: Set[WebSocket] = set()
 adsb_clients:       Set[WebSocket] = set()
@@ -186,11 +197,13 @@ satellite_clients:  Set[WebSocket] = set()
 aprs_clients:       Set[WebSocket] = set()
 ax25_clients:       Set[WebSocket] = set()
 meteor_clients:     Set[WebSocket] = set()
+trunk_clients:      Set[WebSocket] = set()
 
 _mode_sstv: Optional[SSTVDecoder] = None
 _mode_aprs: Optional[APRSDecoder] = None
 _mode_ax25: Optional[AX25Decoder] = None  # rides along with aprs mode (shared direwolf)
 _mode_meteor: Optional[MeteorDecoder] = None  # SatDump owns device 0 directly
+_mode_trunk:  Optional[TrunkMonitor]  = None  # SDRTrunk service owns device 0
 satellite_monitor: Optional[SatelliteMonitor] = None
 radio: Optional[RadioInterface] = None
 sat_tracker: Optional[SatTracker] = None
@@ -272,6 +285,10 @@ async def on_airband_audio(pcm: bytes) -> None:
     await broadcast_bytes(airband_clients, pcm)
 
 
+async def on_dmr_audio(pcm: bytes) -> None:
+    await broadcast_bytes(dmr_audio_clients, pcm)
+
+
 async def on_airband_status(status: dict) -> None:
     airband_status.update(status)
     await broadcast_json(airband_clients, status)
@@ -331,6 +348,14 @@ async def on_meteor_status(msg: dict) -> None:
 
 async def on_meteor_image(msg: dict) -> None:
     await broadcast_json(meteor_clients, msg)
+
+
+async def on_trunk_status(msg: dict) -> None:
+    await broadcast_json(trunk_clients, msg)
+
+
+async def on_trunk_event(msg: dict) -> None:
+    await broadcast_json(trunk_clients, msg)
 
 
 async def on_aprs_packet(msg: dict) -> None:
@@ -523,6 +548,7 @@ async def lifespan(app: FastAPI):
     decoder = DMRDecoder(
         meta_callback=on_meta,
         call_end_callback=on_call_end,
+        audio_callback=on_dmr_audio,
     )
 
     # Start hardware (blocking calls wrapped)
@@ -707,6 +733,23 @@ async def ws_dmr(websocket: WebSocket):
         logger.info("DMR metadata client disconnected — total=%d", len(dmr_clients))
 
 
+@app.websocket("/ws/dmr-audio")
+async def ws_dmr_audio(websocket: WebSocket):
+    await websocket.accept()
+    dmr_audio_clients.add(websocket)
+    logger.info("DMR audio client connected — total=%d", len(dmr_audio_clients))
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in DMR audio WebSocket handler")
+    finally:
+        dmr_audio_clients.discard(websocket)
+        logger.info("DMR audio client disconnected — total=%d", len(dmr_audio_clients))
+
+
 @app.websocket("/ws/airband")
 async def ws_airband(websocket: WebSocket):
     await websocket.accept()
@@ -811,6 +854,10 @@ def _cur_meteor() -> Optional[MeteorDecoder]:
     return _mode_meteor if active_sdr_mode == "meteor" else None
 
 
+def _cur_trunk() -> Optional[TrunkMonitor]:
+    return _mode_trunk if active_sdr_mode == "trunk" else None
+
+
 def _cur_ax25() -> Optional[AX25Decoder]:
     return _mode_ax25 if active_sdr_mode == "aprs" else None
 
@@ -822,7 +869,7 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    VALID = ("dmr", "airband", "adsb", "sstv", "aprs", "meteor")
+    VALID = ("dmr", "airband", "adsb", "sstv", "aprs", "meteor", "trunk")
     if mode not in VALID:
         raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
     async with _mode_lock:
@@ -830,7 +877,7 @@ async def api_set_sdr_mode(mode: str):
 
 
 async def _switch_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor
+    global active_sdr_mode, sdr_task, _mode_airband, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor, _mode_trunk
 
     if mode == active_sdr_mode:
         return {"mode": active_sdr_mode}
@@ -861,6 +908,11 @@ async def _switch_sdr_mode(mode: str):
         if _mode_meteor is not None:
             await _mode_meteor.stop()
             _mode_meteor = None
+
+    elif active_sdr_mode == "trunk":
+        if _mode_trunk is not None:
+            await _mode_trunk.stop()
+            _mode_trunk = None
 
     elif active_sdr_mode == "sstv":
         if sdr_task is not None and not sdr_task.done():
@@ -932,6 +984,19 @@ async def _switch_sdr_mode(mode: str):
             )
             await _mode_meteor.start()
 
+        elif mode == "trunk":
+            # SDRTrunk service claims device 0 over libusb (rtl_tcp stopped above).
+            _mode_trunk = TrunkMonitor(
+                app_dir=TRUNK_APP_DIR,
+                service=TRUNK_SERVICE,
+                site=TRUNK_SITE,
+                control_freq=TRUNK_CONTROL,
+                vnc_url=TRUNK_VNC_URL,
+                status_callback=on_trunk_status,
+                event_callback=on_trunk_event,
+            )
+            await _mode_trunk.start()
+
         elif mode == "sstv":
             # If a satellite is already tracked, centre on its downlink so the
             # Doppler follower in sstv_loop has the signal in the passband.
@@ -963,7 +1028,7 @@ async def _switch_sdr_mode(mode: str):
         # Stop anything partially started — a leaked subprocess keeps device 0
         # busy and the DMR fallback below would fail too.
         for obj in (_mode_airband, _mode_adsb, _mode_sstv, _mode_aprs,
-                    _mode_ax25, _mode_meteor):
+                    _mode_ax25, _mode_meteor, _mode_trunk):
             if obj is not None:
                 try:
                     await obj.stop()
@@ -975,6 +1040,7 @@ async def _switch_sdr_mode(mode: str):
         _mode_aprs    = None
         _mode_ax25    = None
         _mode_meteor  = None
+        _mode_trunk   = None
         try:
             await loop.run_in_executor(None, sdr.stop)  # in case the failed mode left it running
             sdr.freq = INITIAL_FREQ
@@ -1430,6 +1496,38 @@ async def api_meteor_image(path: str):
     if not os.path.isfile(full):
         raise HTTPException(status_code=404)
     return FileResponse(full, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# SDRTrunk trunked-DMR WebSocket + REST endpoints
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/trunk")
+async def ws_trunk(websocket: WebSocket):
+    await websocket.accept()
+    trunk_clients.add(websocket)
+    try:
+        cur = _cur_trunk()
+        if cur:
+            await websocket.send_text(json.dumps(cur.status_dict()))
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in trunk WebSocket handler")
+    finally:
+        trunk_clients.discard(websocket)
+
+
+@app.get("/api/trunk/status")
+async def api_trunk_status():
+    cur = _cur_trunk()
+    if cur:
+        return cur.status_dict()
+    return {"type": "status", "running": False, "tuner_locked": False,
+            "site": TRUNK_SITE, "control_freq": TRUNK_CONTROL,
+            "encrypted_seen": False, "vnc_url": TRUNK_VNC_URL, "recent": []}
 
 
 # ---------------------------------------------------------------------------

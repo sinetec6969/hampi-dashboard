@@ -97,3 +97,9 @@ radio:
   tx_enable: false        # master TX safety switch
   serial: /dev/digirig    # CP2102N — RTS keys PTT (install 99-hampi.rules)
   audio: hw:CARD=Device   # Digirig C-Media codec (`aplay -l` to confirm)
+
+trunk:                    # SDRTrunk trunked-DMR (Connect Plus) — needs `sdrtrunk` systemd --user service + one RTL-SDR
+  service: sdrtrunk       # systemctl --user unit name the dashboard start/stops
+  site: Carolina Connect Site 004
+  control_freq: 454031250 # control channel Hz
+  vnc_url: "100.x.x.x:5901" # Tailscale VNC for the full SDRTrunk UI (optional)

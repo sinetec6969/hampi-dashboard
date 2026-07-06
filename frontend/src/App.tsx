@@ -3,6 +3,7 @@ import { Routes, Route, NavLink } from 'react-router-dom'
 import './App.css'
 import Home from './pages/Home'
 import DMRPage from './pages/DMRPage'
+import TrunkPage from './pages/TrunkPage'
 import ADSBPage from './pages/ADSBPage'
 import APRSPage from './pages/APRSPage'
 import MeshtasticPage from './pages/MeshtasticPage'
@@ -26,6 +27,7 @@ function useIsMobile() {
 
 const NAV_LINKS = [
   { to: '/dmr',         label: 'DMR' },
+  { to: '/trunk',       label: 'Trunk' },
   { to: '/adsb',        label: 'ADS-B' },
   { to: '/aprs',        label: 'APRS' },
   { to: '/ax25',        label: 'AX.25' },
@@ -59,6 +61,7 @@ export default function App() {
         <Routes>
           <Route path="/"           element={<Home />} />
           <Route path="/dmr"        element={<DMRPage />} />
+          <Route path="/trunk"      element={<TrunkPage />} />
           <Route path="/adsb"       element={<ADSBPage />} />
           <Route path="/aprs"       element={<APRSPage />} />
           <Route path="/ax25"       element={<AX25Page />} />

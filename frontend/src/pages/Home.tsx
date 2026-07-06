@@ -96,6 +96,16 @@ const MODES: ModeCard[] = [
     hardware: 'RTL-SDR + satdump',
   },
   {
+    path: '/trunk',
+    icon: '🚔',
+    title: 'Trunked DMR',
+    subtitle: 'Connect Plus',
+    description: 'Track a MOTOTRBO Connect Plus control channel via SDRTrunk. Follows voice grants across LCNs, logs decoded calls, flags encrypted talkgroups. Uses device 0 exclusively — switch SDR mode to hand the dongle to the SDRTrunk service.',
+    status: 'live',
+    color: '#ffcc33',
+    hardware: 'RTL-SDR + SDRTrunk',
+  },
+  {
     path: '/satellite',
     icon: '🛰️',
     title: 'Satellite Telemetry',
@@ -109,7 +119,7 @@ const MODES: ModeCard[] = [
 
 export default function Home() {
   const [info, setInfo] = useState<SysInfo | null>(null)
-  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | null>(null)
+  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'trunk' | null>(null)
   const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
 
@@ -118,7 +128,7 @@ export default function Home() {
     fetch('/api/sdr/mode').then(r => r.json()).then(d => setSdrMode(d.mode)).catch(() => {})
   }, [])
 
-  async function switchMode(mode: 'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor') {
+  async function switchMode(mode: 'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'trunk') {
     if (mode === sdrMode || switching) return
     setSwitching(true)
     try {
@@ -211,6 +221,13 @@ export default function Home() {
               disabled={switching}
             >
               METEOR
+            </button>
+            <button
+              className={'sdr-mode-btn' + (sdrMode === 'trunk' ? ' sdr-mode-active' : '')}
+              onClick={() => switchMode('trunk')}
+              disabled={switching}
+            >
+              Trunk
             </button>
           </div>
           {switching && <span className="sdr-mode-switching">switching…</span>}

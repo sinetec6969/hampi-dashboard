@@ -108,6 +108,7 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
 .badge-grey  { background: #2a2a2a; color: #aaa; }
 .badge-red   { background: #3a0a0a; color: #ff4444; }
 .badge-blue  { background: #0a1a3a; color: #4488ff; }
+.badge-amber { background: #3a2a0a; color: #ffaa33; }
 .dmr-row { display: flex; align-items: center; padding: 2px 0; border-bottom: 1px solid #1a1a1a; font-size: 0.72rem; }
 .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: #333; margin-right: 6px; flex-shrink: 0; }
 .sync-dot.active { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
