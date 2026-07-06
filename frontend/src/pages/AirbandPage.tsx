@@ -42,6 +42,9 @@ export default function AirbandPage() {
   // -----------------------------------------------------------------------
   // WebSocket for status updates
   // -----------------------------------------------------------------------
+  const aliveRef = useRef(true)
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const connectWs = useCallback(() => {
     const ws = new WebSocket(wsUrl('/ws/airband'))
     wsRef.current = ws
@@ -61,13 +64,13 @@ export default function AirbandPage() {
 
     ws.onclose = () => {
       wsRef.current = null
+      if (aliveRef.current) retryRef.current = setTimeout(connectWs, 3000)
     }
-
-    return ws
   }, [])
 
   useEffect(() => {
-    const ws = connectWs()
+    aliveRef.current = true
+    connectWs()
     // Also poll REST on mount in case WS missed the initial status
     fetch('/api/airband/status')
       .then(r => r.json())
@@ -78,7 +81,11 @@ export default function AirbandPage() {
       })
       .catch(() => {})
 
-    return () => { ws.close() }
+    return () => {
+      aliveRef.current = false
+      if (retryRef.current) clearTimeout(retryRef.current)
+      wsRef.current?.close()
+    }
   }, [connectWs])
 
   // -----------------------------------------------------------------------

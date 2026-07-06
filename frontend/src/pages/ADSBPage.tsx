@@ -138,32 +138,41 @@ export default function ADSBPage() {
 
   // WebSocket
   useEffect(() => {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws    = new WebSocket(`${proto}://${location.host}/ws/adsb`)
-    wsRef.current = ws
+    let alive = true
+    let retry: ReturnType<typeof setTimeout> | undefined
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+      const ws    = new WebSocket(`${proto}://${location.host}/ws/adsb`)
+      wsRef.current = ws
 
-    ws.onopen  = () => setConnected(true)
-    ws.onclose = () => setConnected(false)
+      ws.onopen  = () => setConnected(true)
+      ws.onclose = () => { setConnected(false); if (alive) retry = setTimeout(connect, 3000) }
 
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === 'aircraft') {
-          const ac: Aircraft = msg.aircraft
-          setAircraft(prev => ({ ...prev, [ac.icao]: ac }))
-        } else if (msg.type === 'prune') {
-          const expired: string[] = msg.expired
-          setAircraft(prev => {
-            const next = { ...prev }
-            for (const icao of expired) delete next[icao]
-            return next
-          })
-          setSelected(prev => expired.includes(prev ?? '') ? null : prev)
-        }
-      } catch {}
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data)
+          if (msg.type === 'aircraft') {
+            const ac: Aircraft = msg.aircraft
+            setAircraft(prev => ({ ...prev, [ac.icao]: ac }))
+          } else if (msg.type === 'prune') {
+            const expired: string[] = msg.expired
+            setAircraft(prev => {
+              const next = { ...prev }
+              for (const icao of expired) delete next[icao]
+              return next
+            })
+            setSelected(prev => expired.includes(prev ?? '') ? null : prev)
+          }
+        } catch {}
+      }
     }
+    connect()
 
-    return () => { ws.close() }
+    return () => {
+      alive = false
+      if (retry) clearTimeout(retry)
+      wsRef.current?.close()
+    }
   }, [])
 
   const fresh    = Object.values(aircraft).filter(isFresh)

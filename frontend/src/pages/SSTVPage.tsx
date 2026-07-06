@@ -47,6 +47,8 @@ export default function SSTVPage() {
   const canvasRef               = useRef<HTMLCanvasElement>(null)
   const imgDataRef              = useRef<ImageData | null>(null)
   const wsRef                   = useRef<WebSocket | null>(null)
+  const aliveRef                = useRef(true)
+  const retryRef                = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Canvas helpers ─────────────────────────────────────────────────
 
@@ -125,20 +127,27 @@ export default function SSTVPage() {
       }).catch(() => {})
     }
 
-    ws.onclose = () => { wsRef.current = null }
-
-    return ws
+    ws.onclose = () => {
+      wsRef.current = null
+      if (aliveRef.current) retryRef.current = setTimeout(connect, 3000)
+    }
   }, [drawLine, fetchGallery, initCanvas])
 
   useEffect(() => {
+    aliveRef.current = true
     initCanvas(320, 256)
     fetchGallery()
-    const ws = connect()
+    connect()
     const poll = () => fetch('/api/status').then(r => r.json())
       .then(d => { if (d.freq) setTunedHz(d.freq) }).catch(() => {})
     poll()
     const id = setInterval(poll, 3000)
-    return () => { ws.close(); clearInterval(id) }
+    return () => {
+      aliveRef.current = false
+      if (retryRef.current) clearTimeout(retryRef.current)
+      wsRef.current?.close()
+      clearInterval(id)
+    }
   }, [connect, fetchGallery, initCanvas])
 
   // ── Render ────────────────────────────────────────────────────────

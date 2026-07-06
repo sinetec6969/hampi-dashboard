@@ -150,12 +150,15 @@ export default function SatellitePage() {
   const wsRef                        = useRef<WebSocket | null>(null)
 
   useEffect(() => {
+    let alive = true
+    let retry: ReturnType<typeof setTimeout> | undefined
+    function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${location.host}/ws/satellite`)
     wsRef.current = ws
 
     ws.onopen  = () => setConnected(true)
-    ws.onclose = () => { setConnected(false); setMqttOk(false) }
+    ws.onclose = () => { setConnected(false); setMqttOk(false); if (alive) retry = setTimeout(connect, 3000) }
 
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data)
@@ -175,6 +178,8 @@ export default function SatellitePage() {
         setStation(s => ({ ...s, ...msg }))
       }
     }
+    }
+    connect()
 
     // Seed from REST on load
     fetch('/api/satellite/status').then(r => r.json()).then(d => {
@@ -186,7 +191,11 @@ export default function SatellitePage() {
       if (pkts.length) setPackets(pkts)
     }).catch(() => {})
 
-    return () => ws.close()
+    return () => {
+      alive = false
+      if (retry) clearTimeout(retry)
+      wsRef.current?.close()
+    }
   }, [])
 
   return (
