@@ -1,5 +1,11 @@
 # AUDIT — 0.9-b3t4 + SDRTrunk + DMR audio (2026-07-05)
 
+> **Post-change re-run (2026-07-06, after the text + UX passes and 0.9-b3t5):**
+> all seven switcher modes cycled clean again, **zero defunct processes** (the
+> zombie fix holds), waterfall streaming (377 frames/5 s), config precedence
+> PASS, TX guard self-test PASS, `radio.py` untouched (`git diff` empty),
+> `/api/radio/status` identical. No VERIFIED item regressed.
+
 Every claimed feature, classified one of three ways:
 
 - **VERIFIED** — exercised end-to-end in this audit session, on this Pi, and it worked
@@ -118,7 +124,7 @@ Digirig is on the bus at `/dev/ttyUSB1` (CP2102N serial f46a18…), **but
 `/dev/digirig` doesn't exist: the installed udev rules predate the digirig
 line in the repo copy.**
 **Human steps (unchanged from ROADMAP-NEXT Phase A):**
-1. `sudo cp 99-hampi.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger` (needs your password — couldn't do it from here)
+1. ~~Install 99-hampi.rules~~ **done 2026-07-06** — `/dev/digirig` exists now
 2. Confirm the BF-F8HP TX LED on a PTT test
 3. Set deviation by ear, then prove the loopback (our beacon decoded by our APRS RX)
 
