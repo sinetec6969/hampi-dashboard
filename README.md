@@ -6,62 +6,74 @@
 ![RTL-SDR](https://img.shields.io/badge/RTL--SDR-Blog_V4-ff6600?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Raspberry_Pi-c51a4a?style=flat-square&logo=raspberry-pi&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.9--b3t4-blueviolet?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.9--b3t5-blueviolet?style=flat-square)
 ![Status](https://img.shields.io/badge/status-beta-orange?style=flat-square)
 
 ---
 
-> **A $50 Raspberry Pi that sees everything in the air around you — and shows it in a browser.**
+> **A $50 Raspberry Pi that hears everything in the air around you — and shows it in a browser.**
 
-One Pi. A couple of RTL-SDR dongles. A dark browser tab on your phone or laptop.  
-Digital voice decoded. Aircraft tracked. Mesh nodes mapped. SSTV images received. Packets logged.  
-**No cloud. No subscription. No data leaving your network. Ever.**
+One Pi. One RTL-SDR dongle (more if you're greedy). A dark browser tab on your phone.
+Digital voice decoded. Aircraft tracked. Mesh nodes mapped. Weather satellites imaged.
+**No cloud. No subscription. Nothing leaves your network unless you flip a switch that says so.**
 
 ---
 
-## What's Live
+## What's live
 
 | Mode | Status | What it does |
 |---|---|---|
-| 📡 DMR Digital Voice | ✅ Live | Decode · talkgroup aliases · caller map · **offline RadioID DB (307k users)** · call history |
-| ✈️ ADS-B 1090 MHz | ✅ Live | Live aircraft map · CPR position · **local flight lookup (516k aircraft)** · track history |
-| 🛩️ Airband AM | ✅ Live | 118–137 MHz scanner · squelch · real-time AudioWorklet playback |
-| 📻 APRS | ✅ Live | `direwolf` TNC · station map · packet log · weather decode |
-| 📟 AX.25 | ✅ Live | KISS terminal · raw frame log · waterfall click-to-tune · RX-only (TX pending APRS-K1) |
-| 🌐 Meshtastic LoRa | ✅ Live | Mesh monitor · node map · live messages · send / DM |
-| 📺 SSTV | ✅ Live | Scottie S1/S2 · Martin M1/M2 · Robot 36 · live canvas · satellite tracking + Doppler |
-| 🌍 METEOR LRPT | ✅ Live | METEOR-M2 137 MHz QPSK weather imagery via SatDump · MSU-MR composites · pass prediction |
-| 🛰️ Satellite | ✅ Live | TinyGS hardware receiver (LilyGO T3 LoRa32) · local MQTT broker · live telemetry + RX packet feed |
+| 📡 DMR digital voice | ✅ Live | decode + **live audio** · talkgroup aliases · offline RadioID DB (307k users) · call history |
+| 🚔 Trunked DMR | ✅ Live | Connect Plus control-channel tracking via SDRTrunk · call log · encryption flags |
+| ✈️ ADS-B 1090 MHz | ✅ Live | aircraft map · CPR positions · local fleet DB (516k airframes) · track history |
+| 🛩️ Airband AM | ✅ Live | 118–137 MHz scanner · squelch · browser audio |
+| 📻 APRS | ⏳ Waiting on antenna | direwolf TNC · station map · packet log — chain runs, but a 70cm whip is deaf on 2m, so no off-air decode yet |
+| 📟 AX.25 | ⏳ Waiting on antenna | KISS terminal · raw frames · click-to-tune waterfall — same 2m problem |
+| 📺 SSTV | ⏳ Waiting on a bird | Scottie/Martin/Robot36 decoder + live canvas · satellite tracking with Doppler auto-tune — needs an ISS event or a local test signal |
+| 🌍 METEOR LRPT | ⏳ Waiting on a pass | 137 MHz QPSK via SatDump · decoder verified running · first MSU-MR composite needs a satellite overhead |
+| 🌐 Meshtastic LoRa | ✅ Live | node map · messages · send/DM — 204-node mesh on the bench |
+| 🛰️ Satellite telemetry | ✅ Live | TinyGS board → local MQTT · packet feed with hex dump |
 | 📊 Waterfall | ✅ Live | 2.4 MHz FFT · click-to-tune · memory channels |
-| 📱 Mobile UI | ✅ Live | Responsive layout · auto-detects phone vs desktop |
+| 📱 Mobile | ✅ Live | responsive layout, phone-first tested |
+| 📶 Radio TX (Phase A) | 🚧 Started, not RF-confirmed | Digirig PTT + tone calibration page. A valid APRS beacon left the software; nobody has yet seen the radio's TX LED. Honest status: **not done.** |
 
-One dongle covers all SDR modes via the home-page mode-switcher. Add more dongles to run them simultaneously.
+The status column is real — it comes from [AUDIT.md](AUDIT.md), where every row was
+exercised on hardware and classified. "Live" means verified end-to-end this month,
+not "compiled once."
 
----
+One dongle covers every SDR mode through the home-page mode switcher. Extra dongles
+let modes run simultaneously.
 
 ## Hardware
 
 | | |
 |---|---|
-| **Pi** | Raspberry Pi 4 (4 GB+) or Pi 5 |
-| **SDR** | RTL-SDR Blog V4 or any RTL2832U dongle |
-| **Dongles** | 1 → mode-switch all SDR modes · 2 → DMR + Airband · 3 → all simultaneous |
-| **Mesh** | Any Meshtastic USB device (optional) — tested: Heltec WiFi LoRa 32 V3 |
-
----
+| **Pi** | Raspberry Pi 4 (4 GB) — what this runs on. Pi 5 has headroom to spare |
+| **SDR** | RTL-SDR Blog V4 (or any RTL2832U) |
+| **Dongles** | 1 → mode-switch everything · 2 → DMR + airband at once · 3 → add dedicated ADS-B |
+| **Mesh** | any Meshtastic USB device — here: Heltec WiFi LoRa 32 V3 |
+| **Satellite RX** | LilyGO T3 LoRa32 running TinyGS firmware (optional) |
+| **TX (Phase A)** | Digirig Mobile + an HT (BF-F8HP Pro here) — optional, gated off by default |
 
 ## Setup
 
+Two things do **not** come from apt and have to be built from source first:
+the RTL-SDR Blog V4 driver (the stock `librtlsdr` doesn't know the V4's tuner)
+and `dsd-fme` (not packaged anywhere). Follow their READMEs:
+
+- https://github.com/rtlsdrblog/rtl-sdr-blog — build, install, then the blacklist step below
+- https://github.com/lwvmobile/dsd-fme — build; it lands in `/usr/local/bin`
+
 ```bash
-# One-time: free the dongle from the kernel DVB driver
+# Free the dongle from the kernel DVB driver (once, then replug)
 echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/rtlsdr.conf
 sudo modprobe -r dvb_usb_rtl28xxu 2>/dev/null; true
 
-# System packages (direwolf = APRS/AX.25 TNC, satdump = METEOR LRPT)
-sudo apt install rtl-sdr dsd-fme direwolf satdump
+# These two ARE in apt (direwolf = APRS/AX.25 TNC, satdump = METEOR LRPT)
+sudo apt install direwolf satdump
 
-# Serial access (Meshtastic)
-sudo usermod -aG dialout $USER
+# Serial access for Meshtastic / TinyGS / Digirig
+sudo usermod -aG dialout $USER   # log out and back in
 
 # Backend
 cd backend
@@ -74,273 +86,262 @@ npm install && npm run build
 
 # Configure
 cd ..
-cp config.yaml.example config.yaml   # edit frequencies, channels, talkgroups
+cp config.yaml.example config.yaml   # then edit: QTH, talkgroups, frequencies
 
-# Run once to test
+# Run once in the foreground to see it come up
 cd backend && python main.py
 ```
 
-Open `http://<pi-ip>:8000` in any browser on your LAN. Works over [Tailscale](https://tailscale.com) too.
+Open `http://<pi-ip>:8000` from anything on your LAN. Works over
+[Tailscale](https://tailscale.com) too.
 
-### Run on boot (systemd)
+### Run on boot
 
 ```bash
-sudo cp hampi-dashboard.service /etc/systemd/system/   # edit paths/user if needed
+sudo cp hampi-dashboard.service /etc/systemd/system/   # check the paths/user inside
 sudo systemctl daemon-reload
 sudo systemctl enable --now hampi-dashboard
 ```
 
-Stop/start cleans up the whole subprocess tree (rtl_tcp, dsd-fme, direwolf) via cgroup kill.
+Stopping the service kills the whole subprocess tree (rtl_tcp, dsd-fme,
+direwolf, satdump) via cgroup — no orphans holding the dongle.
 
 ### Stable device names (udev)
 
 ```bash
-sudo cp 99-hampi.rules /etc/udev/rules.d/    # edit serials to match your hardware
+sudo cp 99-hampi.rules /etc/udev/rules.d/    # edit the serials to match YOUR hardware
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-Gives `/dev/meshtastic` and `/dev/tinygs` regardless of plug order. For RTL dongles, write **non-numeric** EEPROM serials (`rtl_eeprom -d 0 -s HAMPI0`, replug) and use them in `config.yaml` `rtl_device:` keys — `rtl_tcp`/`rtl_adsb` resolve serials directly, which survives index reshuffles where udev symlinks can't help.
+Gives you `/dev/meshtastic`, `/dev/tinygs`, and `/dev/digirig` regardless of plug
+order. RTL dongles are different: udev symlinks don't help because the tools select
+by index or EEPROM serial. Write non-numeric serials (`rtl_eeprom -d 0 -s HAMPI0`,
+replug) and put those in the `rtl_device:` keys in config.yaml.
 
-### Local databases (optional, recommended)
+### Local databases (optional, worth it)
 
 ```bash
 cd backend
-venv/bin/python build_radioid_db.py    # DMR users   → radioid.db   (17 MB, 307k users)
-venv/bin/python build_aircraft_db.py   # ADS-B fleet → aircraft.db  (34 MB, 516k aircraft)
+venv/bin/python build_radioid_db.py    # DMR users   → radioid.db   (17 MB, 307k)
+venv/bin/python build_aircraft_db.py   # ADS-B fleet → aircraft.db  (34 MB, 516k)
 ```
 
-One-time downloads. With the DBs present, every DMR caller and aircraft lookup is a local sqlite read — re-run whenever you want fresh snapshots.
-
----
+One-time downloads. With these present, every caller and aircraft lookup is a local
+sqlite read and nothing touches the internet. Re-run whenever you want a fresh
+snapshot. Without `radioid.db` the DMR page falls back to the RadioID.net API per
+lookup — it works, but that's your monitoring habits leaving the LAN.
 
 ## Configuration
 
-### SDR mode switcher (device 0)
-
-Home-page toggle: **DMR · Airband · ADS-B · SSTV · APRS** (APRS mode also powers the AX.25 terminal). No server restart, automatic DMR rollback on failure.
-
-### config.yaml
-
-All settings live in `config.yaml` at the repo root — see [`config.yaml.example`](config.yaml.example) for every key with defaults. The old env var names (`SDR_FREQ`, `AIRBAND_SQUELCH`, `ADSB_LAT`, …) still work and **override** the yaml, so systemd drop-ins and one-off shell overrides behave as expected.
+Everything lives in `config.yaml` at the repo root —
+[`config.yaml.example`](config.yaml.example) documents every key. The old env var
+names (`SDR_FREQ`, `AIRBAND_SQUELCH`, …) still work and **override** the yaml, so
+systemd drop-ins and one-off shell overrides behave as expected. Anything set
+nowhere falls back to a sane default.
 
 ```yaml
-sdr:      { freq: 438800000, gain: 49.6 }     # device 0 — mode switcher
+sdr:      { freq: 438800000, gain: 49.6 }     # device 0 — mode switcher home base
+qth:      { grid: EM95of }                    # drives all satellite pass prediction
 airband:
   rtl_device: 1                               # index or EEPROM serial ("HAMPI1")
   squelch: 0.01
   frequencies:
     - { freq: 121500000, label: "Guard" }
-adsb:     { lat_ref: 30.2, lon_ref: -97.7 }
-aprs:     { freq: 144390000, gain: 49.6 }
-meshtastic: { port: /dev/meshtastic }
 talkgroups:                                   # DMR aliases shown next to TG numbers
   91: "Worldwide"
   3116: "Texas"
+geocode:
+  enable: false                               # caller-map pins query OSM Nominatim —
+                                              # city/state of heard calls leaves the
+                                              # LAN. Your call. Off means empty map.
+station:
+  callsign: ""                                # REQUIRED before any transmit
+radio:
+  tx_enable: false                            # the TX master switch. Default: off.
 ```
 
----
+### The mode switcher
 
-## Features
+Device 0 has one owner at a time. The home-page toggle moves it between
+**DMR · Airband · ADS-B · SSTV · APRS · METEOR · Trunk** with no restart. APRS mode
+also feeds the AX.25 terminal (one direwolf, two decoders). METEOR hands the dongle
+to SatDump; Trunk hands it to the SDRTrunk service. If a switch fails, the backend
+rolls back to DMR automatically — that path is tested, not aspirational.
 
-### 📺 SSTV — Image Decoder
+## The modes, briefly
 
-Switch device 0 to SSTV mode and receive Slow Scan Television images in your browser.
+**DMR** — dsd-fme decodes Tier II metadata (timeslot, color code, talkgroup, source
+ID, talker alias) and now blasts decoded voice back over UDP for live listening in
+the browser. Every caller resolves against the offline RadioID snapshot. Call
+history survives restarts.
 
-- **Modes:** Scottie S1 (VIS 60), Scottie S2 (56), Martin M1 (44), Martin M2 (40), Robot 36 (8)
-- **Decode pipeline:** VIS header detection (1900 Hz leader → 1200 Hz break → 7-bit VIS code + parity) → per-line sync hunt → Hilbert instantaneous-frequency channel decode at 48 kHz → RGB assembly
-- **Robot 36:** full YCbCr→RGB conversion with alternating Cr/Cb scan lines
-- **Live canvas** fills top-to-bottom as scan lines arrive; decode progress bar shows line count
-- **Gallery** of all received PNGs; click any image for a full-screen lightbox
-- Images saved to `sstv_images/sstv_YYYYMMDD_HHMMSS.png` via Pillow
-- Default frequency: 145.800 MHz (ISS SSTV events, 2m SSTV activity)
+**Trunked DMR** — a MOTOTRBO Connect Plus site tracked by SDRTrunk running as a
+systemd user service; the dashboard starts and stops it so there's never a fight
+over the dongle. Decoded call events (and who's encrypted) land in the page; the
+full SDRTrunk UI is a VNC hop away if you need it.
 
-### ✈️ ADS-B — Live Aircraft Map
+**ADS-B** — rtl_adsb + pyModeS on 1090 MHz. Positions from CPR pairs (set
+`adsb.lat_ref`/`lon_ref` to decode from single frames too). Registration, type,
+operator joined from the local fleet DB at first sighting.
 
-- `rtl_adsb` + pyModeS 3.3.0 decode DF-17 Extended Squitter at 1090 MHz
-- **Local flight lookup** — registration, type, model, operator joined from `aircraft.db` (OpenSky snapshot, 516k airframes) at first sighting; no runtime API calls
-- Aircraft icons (`✈`) rotate to heading, colour-coded by altitude
-- **Click any aircraft** for reg, type, operator, altitude, speed, heading, vertical rate
-- **Gold track polyline** — last 60 position fixes for the selected contact
-- CPR position: odd/even pair primary; single-message reference fallback
-- Sidebar refreshes every second; contacts roll off after 10 s silence
+**Airband** — real AM demod (envelope detection, 3.5 kHz voice LPF, AGC), scanning
+Guard/CTAF/Center/Departure with squelch hang. Click a channel to lock it.
 
-### 📡 DMR — Caller Intelligence
+**APRS + AX.25** — direwolf fed demodulated FM straight over stdin, no soundcard
+loopback. aprslib parses positions/weather/messages onto a map; the raw AX.25
+frames go to a green-on-black terminal via KISS. Both verified to the antenna
+jack — see the audit for why the packet counter reads zero.
 
-- `dsd-fme` decodes DMR/MOTOTRBO Tier II metadata: timeslot, CC, talkgroup, source ID, talker alias
-- **Offline RadioID DB** — `radioid.db` snapshot (307k users) makes every caller lookup a local sqlite read; falls back to the RadioID.net API only when the DB is absent
-- **Talkgroup aliases** — `talkgroups:` map in config.yaml shown next to TG numbers in the live panel and call history
-- **Caller map** — Nominatim geocodes city/state (cached); click pin for full ID card
-- **Call history** — persisted JSON log; survives server restarts
+**SSTV** — five modes decoded via Hilbert instantaneous frequency, live canvas
+painting line by line. The satellite panel tracks ISS and four CubeSat SSTV birds
+with pass prediction and per-second Doppler retuning for your grid square.
 
-### 🌍 METEOR LRPT — Weather Satellite Imagery
+**METEOR LRPT** — SatDump does the QPSK → Viterbi → Reed-Solomon → image chain
+(nobody should hand-roll that); the dashboard owns the pass workflow: dedicated
+rtl_tcp, live SNR, gallery, AOS countdowns from Celestrak TLEs.
 
-- METEOR-M2 series LRPT on 137 MHz (QPSK 72k) decoded by **SatDump** — the full Viterbi → Reed-Solomon → CCSDS → JPEG chain, not reinvented
-- SatDump runs as a subprocess on device 0 via a dedicated `rtl_tcp` (the apt build's native `rtlsdr` source plugin doesn't register; the `rtltcp` source does)
-- MSU-MR visible/IR channel composites land in a live gallery as the pass decodes
-- **Pass prediction** for your QTH (METEOR TLEs from Celestrak weather) — AOS/LOS countdown so you know when to catch one
-- Switch SDR mode to METEOR from the home page; needs `satdump` installed
+**Meshtastic** — auto-connects over USB serial, maps the mesh, sends broadcasts and
+DMs with the 228-byte limit enforced.
 
-### 📻 APRS — Station Monitoring
+**Satellite telemetry** — a TinyGS LilyGO publishes received satellite packets to
+the Pi's own Mosquitto; the dashboard subscribes and shows RSSI/SNR/frames with a
+hex dump. The board's firmware is patched to talk to local MQTT instead of the
+TinyGS cloud.
 
-- `direwolf` TNC fed 48 kHz FM audio straight from the SDR engine over stdin — no soundcard loopback
-- `aprslib` parses positions, weather, messages, objects, telemetry
-- **Station map** (symbol markers), detail panel (course/speed, path, WX, comment), live packet log
-- RX today; **TX path planned** via BTech APRS-K1 audio cable + radio (direwolf VOX PTT — beacon, digipeat, igate)
-
-### 📟 AX.25 — Packet Terminal
-
-- Rides the same direwolf instance over **KISS TCP (port 8001)** — one process, two decoders
-- Full frame decode: source/dest, up to 8 digipeaters with repeated-flag, I/S/U control (SABM, UA, RR, REJ…), PID, info
-- **Terminal console** — green-on-black scrollback, 500-frame history
-- **Waterfall on-page** with click-to-tune + frequency text entry — the whole chain (rtl_tcp, demod, direwolf) follows the retune live
-- RX only until TX hardware lands
-
-### 🛩️ Airband AM — Channel Scanner
-
-- Full AM demod: IQ → freq shift → decimate 2.4 MHz→48 kHz → envelope → 3.5 kHz LPF → AGC → int16 PCM
-- Scans Guard, CTAF, Center, Departure with configurable dwell and squelch hang
-- AudioWorklet playback at 48 kHz; click any channel to lock; squelch slider
-
-### 🌐 Meshtastic — Mesh Monitor
-
-- Auto-detects any USB Meshtastic device; reconnects every 10 s
-- **Node map** — Leaflet, online/offline indicator, battery, SNR, hop count
-- **Message log** — live-scrolling, channel + DM mode, 228-byte counter
-- Tested: Heltec WiFi LoRa 32 V3 on a 200-node NCMesh network
-
-### 📊 Waterfall & Tuning
-
-- 1024-point FFT, 2.4 MHz bandwidth, Blackman window, dBFS
-- **Click to tune** — crosshair + live frequency label; touch-friendly
-- Memory channels (localStorage) — save freq/gain combos, recall in one tap
-
-### 🔀 SDR Mode Switcher
-
-- Home-page toggle switches device 0 between **DMR · Airband · ADS-B · SSTV** — no server restart
-- Clean handoff: subprocess killed, new mode starts, SDR retuned
-- Automatic rollback to DMR on failure
-
----
+**Radio TX (Phase A)** — the beginning of the transmit era. RTS-line PTT through a
+Digirig, tone generator for deviation calibration, and three hard gates in front of
+all of it: `radio.tx_enable: false` by default, a callsign requirement on every TX
+call, and the serial port never opened until both are satisfied. Current truth:
+software made a valid beacon, RF confirmation still pending an operator at the
+radio. [ROADMAP-NEXT.md](ROADMAP-NEXT.md) has the plan.
 
 ## Architecture
 
 ```
-Device 0 — mode-switchable (home page toggle)
-  ├─ [DMR]
-  │    └─ rtl_tcp :1234 → SDREngine → fm_demodulate → 48 kHz PCM
-  │                             └─ dsd-fme stdin → DMRDecoder
-  │                                  └─ /ws/dmr → caller map · call history
-  ├─ [Airband]
-  │    └─ rtl_tcp :1234 → SDREngine → am_demodulate → 48 kHz PCM (squelch-gated)
-  │                             └─ AirbandScanner → /ws/airband → AudioWorklet
-  ├─ [ADS-B]
-  │    └─ rtl_adsb -d 0 → ADSBDecoder (pyModeS 3.3.0)
-  │                  └─ DF-17 → position · velocity → /ws/adsb → Leaflet map
-  ├─ [SSTV]
-  │    └─ rtl_tcp :1234 → SDREngine → fm_demodulate → 48 kHz PCM
-  │                             └─ SSTVDecoder (Hilbert inst-freq)
-  │                                  └─ /ws/sstv → live canvas · gallery
-  └─ [APRS + AX.25]
-       └─ rtl_tcp :1234 → SDREngine → fm_demodulate → 48 kHz PCM
-                               └─ direwolf (stdin audio, one instance)
-                                    ├─ stdout → aprslib → /ws/aprs → station map · packet log
-                                    └─ KISS :8001 → AX25Decoder → /ws/ax25 → terminal
+Device 0 — one owner at a time (home-page switcher)
+  ├─ [DMR]     rtl_tcp :1234 → SDREngine → FM demod → dsd-fme ─ stderr → /ws/dmr
+  │                                                   └ UDP audio → /ws/dmr-audio
+  ├─ [Airband] rtl_tcp :1234 → SDREngine → AM demod → squelch gate → /ws/airband
+  ├─ [ADS-B]   rtl_adsb -d 0 → pyModeS → /ws/adsb
+  ├─ [SSTV]    rtl_tcp :1234 → SDREngine → FM demod → SSTVDecoder → /ws/sstv
+  │                              └ sat tracker retunes for Doppler once/second
+  ├─ [APRS]    rtl_tcp :1234 → SDREngine → FM demod → direwolf ─ stdout → /ws/aprs
+  │                                                   └ KISS :8001 → /ws/ax25
+  ├─ [METEOR]  rtl_tcp :1236 → SatDump live pipeline → image watcher → /ws/meteor
+  └─ [Trunk]   SDRTrunk (systemd user svc, libusb) → log/CSV tail → /ws/trunk
 
-Device 1 — optional dedicated Airband (AIRBAND_RTL_DEV=1)
-Device 2 — optional dedicated ADS-B  (ADSB_ENABLE=1, ADSB_RTL_DEV=2)
+Always on, own hardware:
+  Heltec V3 (USB)      → MeshtasticHandler → /ws/meshtastic
+  LilyGO T3 (TinyGS)   → local Mosquitto  → SatelliteMonitor → /ws/satellite
+  Digirig (USB, gated) → RadioInterface   → /api/radio/*
 
-Heltec V3 (LoRa, USB serial) → MeshtasticHandler
-  └─ pubsub → asyncio bridge → /ws/meshtastic → node map · messages · send/DM
-
-All SDR modes → /ws/waterfall → browser canvas (click-to-tune)
-
-FastAPI on :8000 — single process, all modes, static frontend from frontend/dist
+FastAPI on :8000 — one process, WS + REST per mode, static frontend from dist/
 ```
 
----
+Separate class per mode, each owning its subprocess or serial connection; all
+WebSocket and REST endpoints registered in `main.py`. That pattern is load-bearing —
+new modes copy it.
 
 ## Troubleshooting
 
-**`usb_claim_interface error -6` / device won't open**  
-Kernel DVB driver has the device. Run the blacklist step in Setup.
+**`usb_claim_interface error -6` / device won't open**
+The kernel DVB driver grabbed the dongle. Run the blacklist step in Setup, replug.
 
-**Airband: no audio**  
-Default is device 1. With one dongle, use the home-page mode switcher and `AIRBAND_ENABLE=0`. Raise `AIRBAND_SQUELCH` if noise trips the gate.
+**Mode switch failed and I'm back in DMR**
+That's the rollback doing its job. Check `journalctl -u hampi-dashboard` for what
+the target mode choked on — usually the dongle was still settling from the last
+owner; try again in a few seconds.
 
-**ADS-B: no aircraft**  
-Switch to ADS-B on the home page (or `ADSB_ENABLE=1`). Set `ADSB_LAT`/`ADSB_LON` — without them, two CPR frames per aircraft are required before position appears.
+**Airband: silence**
+Silence is the squelch working. If you never hear anything, lower the squelch
+slider; if it's all static, raise it. With one dongle make sure device 0 is
+actually in Airband mode — it's the first thing to check for any "no data" symptom.
 
-**SSTV: canvas stays black**  
-Confirm device 0 is in SSTV mode on the home page. Signal RMS bar should move when a signal is present. Default frequency is 145.800 MHz FM — ISS events are announced at [amsat.org](https://www.amsat.org).
+**ADS-B: aircraft in the list but not on the map**
+Position needs two CPR frames (even+odd) per aircraft, or one frame plus
+`adsb.lat_ref`/`lon_ref` in config.yaml. Set your coordinates; it decodes faster.
 
-**Two dongles fighting**  
-Both on the same device index. Set udev rules to pin by serial (see Setup).
+**APRS/AX.25: pipeline up, zero frames**
+direwolf sitting at ~15% CPU means audio is flowing — the silence is RF. 144.39
+needs a 2m-capable antenna; a 70cm whip is deaf there. This install is living
+proof: full audit passed, zero packets heard.
 
-**Meshtastic: "Searching for device…"**  
-Check `groups $USER` includes `dialout`. Run `ls /dev/ttyUSB*`. If ModemManager grabbed the port: `sudo systemctl disable --now ModemManager`. With multiple serial devices attached, pin `meshtastic: port:` in config.yaml (or install the udev rules and use `/dev/meshtastic`).
+**SSTV: canvas stays black**
+Check the mode first (device 0 must be in SSTV mode). The RMS bar should twitch on
+any signal. ISS events are announced at [amsat.org](https://www.amsat.org) — between
+events, 145.800 is quiet, that's normal.
 
-**APRS/AX.25: pipeline up but zero frames**  
-direwolf at steady ~15% CPU means audio is flowing — the silence is RF. 144.39 needs a 2m-capable antenna; a 70cm whip is deaf there. direwolf 1.7 requires a config file (`backend/direwolf.conf` is passed automatically) and its default AGW port 8000 collides with the dashboard — the shipped conf disables it.
+**METEOR: SNR bouncing around 0, "NOSYNC"**
+No satellite overhead. The pass table on the page tells you when the next one is;
+switch to METEOR mode a minute before AOS and let it run through LOS.
 
----
+**Trunk: "Starting" never becomes "Locked"**
+SDRTrunk takes ~20 s to claim the tuner. Stuck longer: something else has device 0
+— go to the home page, switch back to Trunk to force a clean handoff.
 
-## Version History
+**Meshtastic: "Searching for device…"**
+`groups $USER` must include `dialout`. ModemManager loves to steal serial ports:
+`sudo systemctl disable --now ModemManager`. Multiple serial devices? Pin
+`meshtastic: port:` in config.yaml or install the udev rules.
 
-### 0.9-b3t4 — 2026-06-12 · **BETA**
-Every numbered roadmap item shipped. Eight live modes, one Pi, zero cloud.
-- **AX.25 packet terminal** — `ax25.py`: KISS TCP client on the shared APRS-mode direwolf (KISSPORT 8001); full AX.25 decode (digi path with repeated-flag, I/S/U control, PID). `AX25Page.tsx`: green-on-black terminal, on-page waterfall, frequency text entry + click-to-tune retuning the entire chain live. RX only until BTech APRS-K1 + radio arrive.
-- **ADS-B flight lookup** — `build_aircraft_db.py` distills the OpenSky snapshot into `aircraft.db` (sqlite, 516k airframes); registration/type/operator joined locally at first sighting.
-- **Offline RadioID DB** — `build_radioid_db.py` → `radioid.db` (307k users); DMR caller lookups are local reads, no API calls. Live-verified off-air.
-- **Talkgroup aliases** — `talkgroups:` config.yaml map → names in live frames and call history.
-- **direwolf hardening** — `ADEVICE stdin null` (no ALSA grab), AGW port collision with FastAPI resolved.
+**DMR caller map is empty**
+Not broken — geocoding is off by default because it sends heard callers'
+city/state to OpenStreetMap. `geocode: enable: true` if you're fine with that.
+
+**Two dongles fighting**
+Same device index. Give them EEPROM serials (see udev section).
+
+## Version history
+
+### 0.9-b3t5 — 2026-07-06
+The audit release. Every feature exercised on hardware and classified in
+[AUDIT.md](AUDIT.md); four bugs found and fixed (rtl_tcp zombie on kill-timeout,
+negative call durations, ANSI codes in the METEOR log, four pages that never
+reconnected their WebSocket). All user-facing text rewritten by hand. UI unified —
+shared status indicators, honest empty states, mode switcher front and center.
+Since 0.9-b3t4: **METEOR LRPT** (SatDump), **SSTV satellite tracking** (Doppler
+auto-tune), **trunked DMR** (SDRTrunk Connect Plus), **DMR live audio** (UDP
+blaster), and **TX Phase A** started — beacon built, RF unconfirmed.
+
+<details>
+<summary>Earlier releases</summary>
+
+### 0.9-b3t4 — 2026-06-12 · BETA
+Every numbered roadmap item shipped. AX.25 packet terminal (KISS on the shared
+direwolf), ADS-B local fleet DB, offline RadioID DB, talkgroup aliases, direwolf
+hardening.
 
 ### 0.3.0_p4ck3t5 — 2026-06-12
-- **APRS live** — `aprs.py`: direwolf subprocess fed 48 kHz FM audio over stdin, frames parsed with aprslib (position, weather, messages, objects). APRS added to SDR mode switcher (144.390 MHz). `APRSPage.tsx`: station map, detail panel, live packet log. TX path planned via BTech APRS-K1 audio cable (direwolf VOX). Requires `direwolf` ≥1.7 (`sudo apt install direwolf`).
-- **config.yaml** — primary configuration at repo root (see `config.yaml.example`); env vars still override. Editable airband channel list.
-- **systemd service** — `hampi-dashboard.service`: auto-start on boot, cgroup kill cleans up rtl_tcp/dsd-fme/direwolf children.
-- **udev rules** — `99-hampi.rules`: stable `/dev/meshtastic` + `/dev/tinygs` names. `rtl_device` config keys accept EEPROM serial strings (non-numeric) for stable multi-dongle selection.
-- **DMR fix** — call end-time now uses last voice frame timestamp; TLC terminator closes calls promptly.
-- **Frontend fix** — WebSocket reconnect timers cleaned up on unmount (no more zombie reconnects across page navigation).
+APRS live via direwolf over stdin. config.yaml became the primary config. systemd
+service + udev rules. DMR call end-time fix. WS zombie-reconnect fix.
 
 ### 0.2.2_rustylives — 2026-06-08
-- **Satellite telemetry live** — TinyGS-firmware LilyGO T3 V1.6.1 LoRa32 board connects to local Mosquitto over TLS (port 8883, `setInsecure()` cert bypass against self-signed cert) instead of mqtt.tinygs.com. `backend/satellite.py` subscribes `tinygs/#`, parses `tele/ping`, `tele/rx`, and `stat/status` payloads. `SatellitePage.tsx` shows live station telemetry (WiFi RSSI, free mem, radio init status, instantaneous LoRa RSSI) and a packet feed with hex/ASCII dump. Vbat row hidden when USB-powered.
-- **Meshtastic crash fix** — `meshtastic_handler.py` catches `SystemExit` from the library's port auto-detect when multiple serial devices are present.
+TinyGS satellite telemetry via local MQTT (firmware cert bypass against the local
+broker). Meshtastic multi-device crash fix.
 
-### 0.2.1_piperrrrr + SSTV — 2026-06-07
-- **SSTV decoder** — `sstv.py`: full VIS header detect, per-line sync hunt, Hilbert instantaneous-frequency decode, Scottie S1/S2 (GBR), Martin M1/M2 (RGB), Robot 36 (YCbCr). `SSTVPage.tsx`: live canvas, image gallery, lightbox, signal RMS meter. SSTV added to SDR mode switcher (device 0, 145.800 MHz FM).
+### 0.2.1_piperrrrr — 2026-06-05/07
+SSTV decoder (five modes, live canvas). Mobile-responsive layout. DMR audio
+removed (came back better in b3t5).
 
-### 0.2.1_piperrrrr — 2026-06-05
-- **Mobile-responsive layout** — `useIsMobile()` hook + CSS media query (≤768 px). All pages adapt. Nav scrolls horizontally. iOS input-zoom fix.
-- **DMR audio removed** — AMBE decode via `dsd-fme` UDP had persistent sample-rate issues on Pi 4. Page is now metadata-only.
+### 0.2.0 and earlier — 2026-05/06
+ADS-B live map + pyModeS 3.3 rewrite, SDR mode switcher, Meshtastic send/DM,
+airband scanner, first light.
 
-### 0.2.0_n3wb361nn1n6 — 2026-06-05
-- **DMR audio fix** — replaced WAV file polling with dsd-fme UDP output. Per-frame delivery verified live (331 WS frames / 8 s on TG313136).
-- **ADS-B UI** — per-second refresh, 10 s stale rolloff, ID·HDG·SPD column layout.
-- **ADS-B decoder** — full rewrite for pyModeS 3.3.0.
-
-### 0.1.4_THEPLANES — 2026-06-04
-- ADS-B live aircraft map, CPR decode, SDR mode switcher.
-
-### 0.1.3_s3ndIt — 2026-05-17
-- Meshtastic send / DM, real channel names from device.
-
-### 0.1.1–0.1.2 — 2026-05-16–17
-- Meshtastic live on hardware (200-node mesh). Airband AM scanner.
+</details>
 
 [Full commit history →](https://github.com/sinetec6969/hampi-dashboard/commits/master)
 
----
-
 ## Roadmap
 
-Roadmap I ([ROADMAP.md](ROADMAP.md)) is complete as of 0.9-b3t4. The TX era is underway in **[ROADMAP-NEXT.md](ROADMAP-NEXT.md)**:
+Roadmap I (RX) is done — [ROADMAP.md](ROADMAP.md). The TX era is
+[ROADMAP-NEXT.md](ROADMAP-NEXT.md):
 
-- **TX foundation (Phase A — 🚧 in progress)** — Digirig Mobile (USB audio + hardware RTS PTT). Software path built and a valid APRS beacon transmitted on 144.390; **RF not yet confirmed** (radio keying / deviation pending an operator at the rig). The `Radio TX` page drives PTT + tone bring-up, gated behind `radio.tx_enable` + `station.callsign`.
-- **APRS TX** — beacon/messaging/digipeat; **AX.25 connected-mode** BBS terminal; **SSTV transmit**; **Winlink** (`pat`)
-- **HamPi as LAN TNC** — KISS over network for APRSdroid/RadioMail
-- **Satellite pass prediction** — `skyfield` + Celestrak TLE, alert UI on TinyGS pass window
-- **Trunked DMR · ADS-B extras · HF modes** — the long tail
+- **Phase A, in progress:** Digirig bring-up. Blocked on a human confirming the
+  radio actually keys (TX LED), then deviation by ear, then decoding our own
+  beacon. Also: a 2m antenna, which unblocks APRS/AX.25 RX at the same time.
+- **Then:** APRS beacon + messaging, AX.25 connected mode, HamPi as a LAN KISS
+  TNC, SSTV transmit, Winlink.
 
 ---
 
-*Built on a Pi. Runs on your LAN. Sees everything.*
+*Built on a Pi. Runs on your LAN. Hears everything.*
