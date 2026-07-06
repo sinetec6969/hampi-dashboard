@@ -107,7 +107,7 @@ export default function MeteorPage() {
       {/* Pass prediction */}
       <div style={{ border: '1px solid #333', background: '#0c0c0c', padding: 10, fontSize: 13 }}>
         <div style={{ color: '#3a7', fontWeight: 600, marginBottom: 4 }}>🛰 METEOR passes</div>
-        {sats.length === 0 && <div style={{ color: '#888' }}>No TLEs loaded.</div>}
+        {sats.length === 0 && <div style={{ color: '#888' }}>No TLEs — the Celestrak fetch failed. Check the Pi's network; TLEs retry on restart.</div>}
         {sats.map(s => (
           <div key={s.norad} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, padding: '4px 0', borderTop: '1px solid #1c1c1c', alignItems: 'center' }}>
             <span title={s.desc}>{s.name} <span style={{ color: '#666', fontSize: 11 }}>{(s.freq / 1e6).toFixed(3)} {s.mode}</span></span>
@@ -134,7 +134,8 @@ export default function MeteorPage() {
         </div>
         {images.length === 0 ? (
           <div style={{ color: '#555', padding: 12 }}>
-            No images yet. Decoded MSU-MR composites appear here after a successful pass.
+            No imagery yet — LRPT only transmits while a METEOR is overhead. Be in this mode
+            when the pass table above says AOS, stay until LOS, and the composites appear here.
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>

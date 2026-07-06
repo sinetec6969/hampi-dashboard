@@ -106,7 +106,7 @@ export default function AX25Page() {
           {active && kissUp ? '● KISS' : '○ KISS'}
         </span>
         <span className="badge" style={{ color: '#ff8844', borderColor: '#ff8844' }}>
-          RX only — TX pending BTech APRS-K1 + radio
+          RX only — TX lands with Phase A (Digirig)
         </span>
       </div>
 
@@ -130,7 +130,9 @@ export default function AX25Page() {
       }}>
         {frames.length === 0 ? (
           <span style={{ color: '#555' }}>
-            {active ? 'Monitoring… frames will appear here. Click the waterfall or enter a frequency to retune.' : 'Waiting for APRS mode.'}
+            {active
+              ? 'Monitoring. Frames print here as direwolf decodes them — click the waterfall or type a frequency to retune the whole chain. Zero frames on a 70cm whip is normal; 2m antenna pending.'
+              : 'The terminal wakes up in APRS mode — one direwolf feeds both pages.'}
           </span>
         ) : (
           frames.map((f, i) => <div key={i}>{frameLine(f)}</div>)

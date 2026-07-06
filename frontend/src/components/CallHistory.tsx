@@ -61,7 +61,7 @@ export default function CallHistory() {
       </div>
 
       {calls.length === 0 ? (
-        <div style={{ color: "#444", fontSize: 12 }}>No calls recorded yet.</div>
+        <div style={{ color: "#444", fontSize: 12 }}>No calls logged yet. Finished calls land here and survive restarts.</div>
       ) : (
         <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, color: "#ccc", tableLayout: "fixed" }}>

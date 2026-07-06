@@ -284,7 +284,7 @@ export default function MeshtasticPage() {
           <span className="mesh-conn-text">
             {status.connected
               ? `${status.device ?? 'connected'} · ${onlineN}/${nodes.length} online`
-              : status.available ? 'Searching for device…' : 'Install: pip install meshtastic'}
+              : status.available ? 'Searching for a radio on USB — check the cable and that ModemManager isn’t squatting the port' : 'meshtastic package missing — pip install meshtastic in backend/venv, restart the service'}
           </span>
           {status.local_id && <span className="mesh-local-id">{status.local_id}</span>}
         </div>
@@ -301,7 +301,7 @@ export default function MeshtasticPage() {
 
           {sorted.length === 0 ? (
             <div className="mesh-empty">
-              {status.connected ? 'No nodes heard yet' : 'Waiting for device…'}
+              {status.connected ? 'Radio connected, no nodes heard yet — give the mesh a minute' : 'No radio yet — nodes appear once one connects'}
             </div>
           ) : sorted.map(node => (
             <div

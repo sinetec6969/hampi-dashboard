@@ -289,8 +289,8 @@ export default function ADSBPage() {
               {fresh.length === 0 ? (
                 <div className="adsb-list-empty">
                   {connected
-                    ? 'Waiting for aircraft…'
-                    : 'ADS-B offline — switch SDR mode or enable ADSB_ENABLE=1'}
+                    ? 'Listening on 1090 MHz — no aircraft yet. Is device 0 in ADS-B mode? The home-page switcher is the answer to most silence.'
+                    : 'Not connected to the server — reconnecting…'}
                 </div>
               ) : (
                 <>

@@ -225,7 +225,9 @@ export default function APRSPage() {
               <div style={{ flex: '0 0 50%', overflowY: 'auto' }}>
                 {Object.keys(stations).length === 0 ? (
                   <div className="adsb-list-empty">
-                    {connected ? 'Waiting for packets…' : 'APRS offline — switch SDR mode on the home page'}
+                    {connected
+                      ? 'Pipeline up, nothing heard yet. If direwolf is running the silence is RF — 144.39 needs a 2m antenna, and a 70cm whip is deaf there.'
+                      : 'APRS isn’t running — switch device 0 to APRS on the home page.'}
                   </div>
                 ) : (
                   Object.values(stations)

@@ -147,6 +147,7 @@ export default function SatellitePage() {
   const [mqttOk, setMqttOk]         = useState(false)
   const [station, setStation]       = useState<StationInfo>({})
   const [packets, setPackets]       = useState<SatPacket[]>([])
+  const [piIp, setPiIp]             = useState('')
   const wsRef                        = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -182,6 +183,7 @@ export default function SatellitePage() {
     connect()
 
     // Seed from REST on load
+    fetch('/api/sysinfo').then(r => r.json()).then(d => setPiIp(d.local_ip ?? '')).catch(() => {})
     fetch('/api/satellite/status').then(r => r.json()).then(d => {
       setMqttOk(d.mqtt_connected ?? false)
       if (d.station) setStation(d.station)
@@ -253,14 +255,15 @@ export default function SatellitePage() {
         </div>
         {!mqttOk && (
           <div className="sat-setup-hint">
-            Point TinyGS board MQTT server to <strong>10.132.28.20</strong> port <strong>1883</strong> via the board's web config.
+            No broker link. Check the TinyGS board is plugged in and powered, and that its
+            web config points MQTT at this Pi{piIp ? <> (<strong>{piIp}</strong> port <strong>1883</strong>)</> : ''} — not mqtt.tinygs.com.
           </div>
         )}
       </div>
 
       <div className="sat-count">
         {packets.length === 0
-          ? 'No packets received yet'
+          ? 'No packets yet — they arrive when the board hears a satellite pass'
           : `${packets.length} packet${packets.length !== 1 ? 's' : ''} received`}
       </div>
 

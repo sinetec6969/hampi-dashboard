@@ -125,7 +125,7 @@ export default function AirbandPage() {
               </button>
             </>
           ) : (
-            <span className="airband-disabled-badge">No SDR device — set AIRBAND_RTL_DEV</span>
+            <span className="airband-disabled-badge">Not running — switch device 0 to Airband on the home page</span>
           )}
         </div>
       </div>
@@ -196,11 +196,9 @@ export default function AirbandPage() {
 
           {!enabled && (
             <div className="airband-setup-hint">
-              <div className="panel-title" style={{ marginBottom: 6 }}>Setup</div>
-              <p>Airband scanner needs a second RTL-SDR dongle.</p>
-              <p>Restart the server with:</p>
-              <code>AIRBAND_RTL_DEV=1 AIRBAND_ENABLE=1</code>
-              <p style={{ marginTop: 6 }}>Single-dongle: use <code>AIRBAND_RTL_DEV=0</code> but DMR and airband cannot run simultaneously.</p>
+              <div className="panel-title" style={{ marginBottom: 6 }}>Two ways to run this</div>
+              <p>One dongle: flip the SDR switcher on the home page to <b>Airband</b>. DMR pauses while you listen.</p>
+              <p style={{ marginTop: 6 }}>Two dongles: give airband its own in <code>config.yaml</code> (<code>airband.rtl_device: 1</code>) and it runs alongside DMR all the time.</p>
             </div>
           )}
         </div>

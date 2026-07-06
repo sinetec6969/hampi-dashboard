@@ -52,7 +52,7 @@ const MODES: ModeCard[] = [
     icon: '✈️',
     title: 'ADS-B',
     subtitle: '1090 MHz Aircraft',
-    description: 'Live aircraft map from 1090 MHz transponder broadcasts via rtl_adsb. Altitude, speed, heading, track history, click for details. Switch SDR mode or set ADSB_ENABLE=1 for a dedicated dongle.',
+    description: 'Live aircraft map from 1090 MHz transponder broadcasts via rtl_adsb. Altitude, speed, heading, track history, click for details. Switch device 0 here, or give ADS-B its own dongle in config.yaml.',
     status: 'live',
     color: '#4488ff',
   },

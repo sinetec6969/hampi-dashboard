@@ -104,7 +104,7 @@ export default function ContactsPanel() {
 
       <div style={{ overflowY: 'auto', flex: 1 }}>
         {contacts.length === 0 && (
-          <div style={{ color: '#444', fontSize: '0.7rem' }}>No contacts yet…</div>
+          <div style={{ color: '#444', fontSize: '0.7rem' }}>Nobody heard yet — callers stack up here as voice frames decode.</div>
         )}
         {contacts.map(c => (
           <div key={c.src_id} style={{

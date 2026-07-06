@@ -205,15 +205,15 @@ export default function SSTVPage() {
           )}
           {status.state === 'disabled' && (
             <div className="sstv-hint">
-              Switch SDR mode to <strong>SSTV</strong> from the home page.<br />
-              Default frequency: 145.800 MHz (ISS SSTV / 2m FM).<br />
-              Pick a satellite above to track it (Doppler auto-tune).
+              The decoder is asleep — switch device 0 to <strong>SSTV</strong> on the home page.<br />
+              Default frequency: 145.800 MHz FM (where ISS SSTV events live).<br />
+              Or pick a satellite above and tracking retunes for Doppler on its own.
             </div>
           )}
           {status.state === 'idle' && (
             <div className="sstv-hint">
-              Listening on {(tunedHz / 1e6).toFixed(3)} MHz FM.<br />
-              Waiting for SSTV leader tone (1900 Hz).
+              Listening on {(tunedHz / 1e6).toFixed(3)} MHz FM for the 1900 Hz leader tone.<br />
+              Quiet between ISS events is normal — the RMS bar up top twitches when anything is there.
             </div>
           )}
         </div>
@@ -225,7 +225,7 @@ export default function SSTVPage() {
             <span className="sstv-gallery-count">{gallery.length}</span>
           </div>
           {gallery.length === 0 ? (
-            <div className="sstv-gallery-empty">No images received yet</div>
+            <div className="sstv-gallery-empty">Nothing decoded yet. The first full image — off a bird or a test transmission — lands here.</div>
           ) : (
             <div className="sstv-gallery-grid">
               {gallery.map(item => (
