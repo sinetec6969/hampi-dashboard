@@ -159,6 +159,7 @@ class SDREngine:
                 self._proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+                self._proc.wait()  # reap — kill() alone leaves a zombie
             self._proc = None
         logger.info("SDREngine stopped")
 
