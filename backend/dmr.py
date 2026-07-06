@@ -77,6 +77,22 @@ def _map_ftype(raw: str) -> str:
 
 MetaCallback     = Callable[[dict], Awaitable[None]]
 CallEndCallback  = Callable[[dict], Awaitable[None]]
+AudioCallback    = Callable[[bytes], Awaitable[None]]
+
+AUDIO_UDP_PORT = 23456
+
+
+class _AudioProtocol(asyncio.DatagramProtocol):
+    """Receives dsd-fme UDP blaster PCM; queues it for ordered delivery."""
+
+    def __init__(self, queue: asyncio.Queue):
+        self._queue = queue
+
+    def datagram_received(self, data: bytes, addr) -> None:
+        try:
+            self._queue.put_nowait(data)
+        except asyncio.QueueFull:
+            pass
 
 
 @dataclass
@@ -99,14 +115,18 @@ class DMRFrame:
 class DMRDecoder:
     """Async wrapper around dsd-fme."""
 
-    DSD_ARGS = ["dsd-fme", "-i", "-", "-fs", "-o", "null"]
+    DSD_ARGS = ["dsd-fme", "-i", "-", "-fs", "-o", f"udp:127.0.0.1:{AUDIO_UDP_PORT}"]
 
     def __init__(self, meta_callback: MetaCallback,
-                 call_end_callback: Optional[CallEndCallback] = None):
+                 call_end_callback: Optional[CallEndCallback] = None,
+                 audio_callback: Optional[AudioCallback] = None):
         self._meta_cb     = meta_callback
         self._call_end_cb = call_end_callback
+        self._audio_cb    = audio_callback
         self._proc:       Optional[asyncio.subprocess.Process] = None
         self._tasks:      list[asyncio.Task] = []
+        self._udp_transport = None
+        self._audio_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
         # Per-slot persistent call context (1-indexed: slot 1 and 2)
         self._slot_ctx: dict[int, dict] = {
@@ -131,6 +151,14 @@ class DMRDecoder:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
+        if self._audio_cb and self._udp_transport is None:
+            loop = asyncio.get_running_loop()
+            self._udp_transport, _ = await loop.create_datagram_endpoint(
+                lambda: _AudioProtocol(self._audio_queue),
+                local_addr=("127.0.0.1", AUDIO_UDP_PORT),
+            )
+            logger.info("DMR audio UDP listener on 127.0.0.1:%d", AUDIO_UDP_PORT)
+
         logger.info("Starting dsd-fme: %s", " ".join(self.DSD_ARGS))
         self._proc = await asyncio.create_subprocess_exec(
             *self.DSD_ARGS,
@@ -143,6 +171,9 @@ class DMRDecoder:
         self._tasks = [
             asyncio.create_task(self._read_stderr(), name="dfme-stderr"),
         ]
+        if self._audio_cb:
+            self._tasks.append(
+                asyncio.create_task(self._drain_audio(), name="dfme-audio"))
 
     async def stop(self) -> None:
         for task in self._tasks:
@@ -150,6 +181,10 @@ class DMRDecoder:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+
+        if self._udp_transport is not None:
+            self._udp_transport.close()
+            self._udp_transport = None
 
         if self._proc:
             try:
@@ -182,6 +217,26 @@ class DMRDecoder:
     # ------------------------------------------------------------------
     # Background tasks
     # ------------------------------------------------------------------
+
+    async def _drain_audio(self) -> None:
+        """Relay dsd-fme UDP blaster PCM to the audio callback, in order."""
+        rate_bytes = 0
+        rate_t0    = time.monotonic()
+        try:
+            while True:
+                data = await self._audio_queue.get()
+                rate_bytes += len(data)
+                now = time.monotonic()
+                if now - rate_t0 >= 10:
+                    logger.info("DMR audio: %d B/s from dsd-fme UDP",
+                                int(rate_bytes / (now - rate_t0)))
+                    rate_bytes, rate_t0 = 0, now
+                try:
+                    await self._audio_cb(data)
+                except Exception:
+                    logger.exception("audio_callback raised an exception")
+        except asyncio.CancelledError:
+            pass
 
     async def _read_stderr(self) -> None:
         """Parse dsd-fme stderr for DMR call metadata."""

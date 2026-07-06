@@ -84,6 +84,20 @@ export default function MapPanel() {
     }
   }, [])
 
+  // Drop pins not heard in 5 minutes
+  useEffect(() => {
+    const t = setInterval(() => {
+      const cutoff = Date.now() - 5 * 60_000
+      setContacts(prev => {
+        const stale = prev.filter(c => c.lastSeen < cutoff)
+        if (stale.length === 0) return prev
+        stale.forEach(c => lookedUp.current.delete(c.src_id))
+        return prev.filter(c => c.lastSeen >= cutoff)
+      })
+    }, 15_000)
+    return () => clearInterval(t)
+  }, [])
+
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%' }}>
       {/* contact count badge */}

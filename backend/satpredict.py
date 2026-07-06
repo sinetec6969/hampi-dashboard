@@ -44,6 +44,12 @@ DEFAULT_SSTV_SATS = [
     {"norad": 59112, "name": "SONATE-2", "freq": 145_880_000, "mode": "FM · Martin M1",
      "desc": "Würzburg AI tech-demo CubeSat — onboard-camera imagery as SSTV "
              "(Martin M1) on 145.880 FM (2 m). 437.025 is its GMSK telemetry, not SSTV."},
+    {"norad": 57189, "name": "RS-38S (VIZARD-METEO)", "freq": 437_825_000, "mode": "FM · Robot 36",
+     "desc": "Russian weather/imaging CubeSat — SSTV (Robot 36) on 437.825 FM (70 cm), "
+             "shares the downlink with GMSK telemetry. Event-driven, like the other RS birds."},
+    {"norad": 67290, "name": "SAKHACUBE-CHOLBON (RS18S)", "freq": 437_350_000, "mode": "FM · Robot 36",
+     "desc": "Sakha Republic educational CubeSat — SSTV (Robot 36, 120/180 s intervals) "
+             "on 437.350 FM (70 cm). Also GMSK 2.4–9.6k telemetry on the same downlink."},
 ]
 
 

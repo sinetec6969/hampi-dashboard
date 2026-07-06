@@ -6,6 +6,7 @@ import ContactsPanel from '../components/ContactsPanel'
 import MapPanel from '../components/MapPanel'
 import MemoryChannels from '../components/MemoryChannels'
 import CallHistory from '../components/CallHistory'
+import AudioPlayer from '../components/AudioPlayer'
 
 export default function DMRPage() {
   const [freq, setFreq] = useState(438800000)
@@ -57,6 +58,7 @@ export default function DMRPage() {
           </div>
         </div>
         <div className="right-col">
+          <AudioPlayer wsPath="/ws/dmr-audio" inputRate={8000} label="DMR Audio" />
           <CallHistory />
         </div>
       </div>

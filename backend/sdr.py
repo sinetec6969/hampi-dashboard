@@ -10,7 +10,7 @@ import time
 from typing import Optional
 
 import numpy as np
-from scipy.signal import firwin, lfilter, lfilter_zi
+from scipy.signal import firwin, lfilter, lfilter_zi, decimate
 
 logger = logging.getLogger(__name__)
 
