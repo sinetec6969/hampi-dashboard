@@ -406,7 +406,7 @@ class DMRDecoder:
             "id":         f"{datetime.fromtimestamp(start_time).strftime('%Y%m%d_%H%M%S')}_{src_id}",
             "started_at": datetime.fromtimestamp(start_time).isoformat(),
             "ended_at":   datetime.fromtimestamp(end_time).isoformat(),
-            "duration_s": round(end_time - start_time, 1),
+            "duration_s": max(0.0, round(end_time - start_time, 1)),
             "src_id":     src_id,
             "dst_id":     call_info.get("dst_id", 0),
             "group":      call_info.get("group", True),
