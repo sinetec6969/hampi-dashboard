@@ -17,11 +17,30 @@ interface ModeCard {
   status: 'live' | 'coming-soon'
   color: string
   hardware?: string
+  sdrMode?: SdrMode   // set when this card is one of the device-0 switcher modes
 }
+
+type SdrMode = 'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'trunk'
+
+const MODE_TITLE: Record<SdrMode, string> = {
+  dmr: 'DMR', airband: 'Airband', adsb: 'ADS-B', sstv: 'SSTV',
+  aprs: 'APRS', meteor: 'METEOR', trunk: 'Trunk',
+}
+
+const SDR_MODES: { mode: SdrMode; label: string }[] = [
+  { mode: 'dmr',     label: 'DMR' },
+  { mode: 'airband', label: 'Airband' },
+  { mode: 'adsb',    label: 'ADS-B' },
+  { mode: 'sstv',    label: 'SSTV' },
+  { mode: 'aprs',    label: 'APRS' },
+  { mode: 'meteor',  label: 'METEOR' },
+  { mode: 'trunk',   label: 'Trunk' },
+]
 
 const MODES: ModeCard[] = [
   {
     path: '/dmr',
+    sdrMode: 'dmr',
     icon: '📡',
     title: 'DMR Voice',
     subtitle: 'Digital Mobile Radio',
@@ -31,6 +50,7 @@ const MODES: ModeCard[] = [
   },
   {
     path: '/airband',
+    sdrMode: 'airband',
     icon: '🛩',
     title: 'Airband AM',
     subtitle: 'VHF 118–137 MHz',
@@ -49,6 +69,7 @@ const MODES: ModeCard[] = [
   },
   {
     path: '/adsb',
+    sdrMode: 'adsb',
     icon: '✈️',
     title: 'ADS-B',
     subtitle: '1090 MHz Aircraft',
@@ -58,6 +79,7 @@ const MODES: ModeCard[] = [
   },
   {
     path: '/aprs',
+    sdrMode: 'aprs',
     icon: '📻',
     title: 'APRS',
     subtitle: '144.390 MHz Packet',
@@ -68,6 +90,7 @@ const MODES: ModeCard[] = [
   },
   {
     path: '/ax25',
+    sdrMode: 'aprs',
     icon: '📟',
     title: 'AX.25 Terminal',
     subtitle: 'Packet Radio / KISS',
@@ -78,6 +101,7 @@ const MODES: ModeCard[] = [
   },
   {
     path: '/sstv',
+    sdrMode: 'sstv',
     icon: '📺',
     title: 'SSTV',
     subtitle: '145.800 MHz FM',
@@ -87,6 +111,7 @@ const MODES: ModeCard[] = [
   },
   {
     path: '/meteor',
+    sdrMode: 'meteor',
     icon: '🌍',
     title: 'METEOR LRPT',
     subtitle: '137 MHz Weather',
@@ -97,6 +122,7 @@ const MODES: ModeCard[] = [
   },
   {
     path: '/trunk',
+    sdrMode: 'trunk',
     icon: '🚔',
     title: 'Trunked DMR',
     subtitle: 'Connect Plus',
@@ -119,8 +145,9 @@ const MODES: ModeCard[] = [
 
 export default function Home() {
   const [info, setInfo] = useState<SysInfo | null>(null)
-  const [sdrMode, setSdrMode] = useState<'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'trunk' | null>(null)
-  const [switching, setSwitching] = useState(false)
+  const [sdrMode, setSdrMode] = useState<SdrMode | null>(null)
+  const [switching, setSwitching] = useState<SdrMode | null>(null)
+  const [switchErr, setSwitchErr] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -128,21 +155,26 @@ export default function Home() {
     fetch('/api/sdr/mode').then(r => r.json()).then(d => setSdrMode(d.mode)).catch(() => {})
   }, [])
 
-  async function switchMode(mode: 'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'trunk') {
+  async function switchMode(mode: SdrMode) {
     if (mode === sdrMode || switching) return
-    setSwitching(true)
+    setSwitching(mode)
+    setSwitchErr('')
     try {
       const r = await fetch(`/api/sdr/mode?mode=${mode}`, { method: 'POST' })
       if (r.ok) {
         const d = await r.json()
         setSdrMode(d.mode)
       } else {
-        // switch failed — backend fell back to DMR; re-read actual mode
+        // switch failed — backend rolled back to DMR; tell the user, don't hide it
+        const d = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }))
+        setSwitchErr(`${d.detail ?? 'switch failed'} — rolled back. Usually the dongle was still settling; try again in a few seconds.`)
         const cur = await fetch('/api/sdr/mode').then(res => res.json())
         setSdrMode(cur.mode)
       }
-    } catch {}
-    setSwitching(false)
+    } catch {
+      setSwitchErr('Lost the server mid-switch — reload the page and check the service.')
+    }
+    setSwitching(null)
   }
 
   return (
@@ -177,60 +209,30 @@ export default function Home() {
       </div>
 
       {sdrMode !== null && (
-        <div className="sdr-mode-bar">
-          <span className="sdr-mode-label">SDR</span>
-          <div className="sdr-mode-toggle">
-            <button
-              className={'sdr-mode-btn' + (sdrMode === 'dmr' ? ' sdr-mode-active' : '')}
-              onClick={() => switchMode('dmr')}
-              disabled={switching}
-            >
-              DMR
-            </button>
-            <button
-              className={'sdr-mode-btn' + (sdrMode === 'airband' ? ' sdr-mode-active' : '')}
-              onClick={() => switchMode('airband')}
-              disabled={switching}
-            >
-              Airband
-            </button>
-            <button
-              className={'sdr-mode-btn' + (sdrMode === 'adsb' ? ' sdr-mode-active' : '')}
-              onClick={() => switchMode('adsb')}
-              disabled={switching}
-            >
-              ADS-B
-            </button>
-            <button
-              className={'sdr-mode-btn' + (sdrMode === 'sstv' ? ' sdr-mode-active' : '')}
-              onClick={() => switchMode('sstv')}
-              disabled={switching}
-            >
-              SSTV
-            </button>
-            <button
-              className={'sdr-mode-btn' + (sdrMode === 'aprs' ? ' sdr-mode-active' : '')}
-              onClick={() => switchMode('aprs')}
-              disabled={switching}
-            >
-              APRS
-            </button>
-            <button
-              className={'sdr-mode-btn' + (sdrMode === 'meteor' ? ' sdr-mode-active' : '')}
-              onClick={() => switchMode('meteor')}
-              disabled={switching}
-            >
-              METEOR
-            </button>
-            <button
-              className={'sdr-mode-btn' + (sdrMode === 'trunk' ? ' sdr-mode-active' : '')}
-              onClick={() => switchMode('trunk')}
-              disabled={switching}
-            >
-              Trunk
-            </button>
+        <div className="sdr-mode-block">
+          <div className="sdr-mode-bar">
+            <span className="sdr-mode-label">Device 0</span>
+            <div className="sdr-mode-toggle">
+              {SDR_MODES.map(({ mode, label }) => (
+                <button
+                  key={mode}
+                  className={'sdr-mode-btn'
+                    + (sdrMode === mode ? ' sdr-mode-active' : '')
+                    + (switching === mode ? ' sdr-mode-pending' : '')}
+                  onClick={() => switchMode(mode)}
+                  disabled={switching !== null}
+                >
+                  {switching === mode ? `${label}…` : label}
+                </button>
+              ))}
+            </div>
           </div>
-          {switching && <span className="sdr-mode-switching">switching…</span>}
+          {switching && (
+            <div className="sdr-mode-note">
+              stopping {MODE_TITLE[sdrMode]} · starting {MODE_TITLE[switching]} — a failed start rolls back to DMR
+            </div>
+          )}
+          {switchErr && <div className="sdr-mode-error">{switchErr}</div>}
         </div>
       )}
 
@@ -244,8 +246,13 @@ export default function Home() {
           >
             <div className="mode-card-top">
               <span className="mode-card-icon">{m.icon}</span>
-              <span className={'mode-card-badge ' + (m.status === 'live' ? 'badge-live' : 'badge-soon')}>
-                {m.status === 'live' ? '● Live' : '○ Soon'}
+              <span style={{ display: 'flex', gap: 6 }}>
+                {m.sdrMode && m.sdrMode === sdrMode && (
+                  <span className="mode-card-badge badge-active">▶ on device 0</span>
+                )}
+                <span className={'mode-card-badge ' + (m.status === 'live' ? 'badge-live' : 'badge-soon')}>
+                  {m.status === 'live' ? '● Live' : '○ Soon'}
+                </span>
               </span>
             </div>
             <div className="mode-card-title">{m.title}</div>
