@@ -54,8 +54,8 @@ function rssiBar(rssi: number): string {
 
 function rssiColor(rssi: number): string {
   if (rssi > -80) return '#00ff88'
-  if (rssi > -100) return '#ffcc44'
-  return '#ff4444'
+  if (rssi > -100) return '#ffb000'
+  return '#ff3355'
 }
 
 function hexRows(raw: string): string[] {
@@ -80,7 +80,7 @@ function PacketCard({ pkt }: { pkt: SatPacket }) {
   const valid = !pkt.crc_error && !pkt.noisy
 
   return (
-    <div className="sat-packet" style={{ borderLeftColor: valid ? col : '#ff4444' }}>
+    <div className="sat-packet" style={{ borderLeftColor: valid ? col : '#ff3355' }}>
       <div className="sat-packet-header" onClick={() => setExpanded(e => !e)}>
         <div className="sat-packet-left">
           <span className="sat-packet-time">{fmtTime(pkt.time)}</span>
@@ -203,7 +203,7 @@ export default function SatellitePage() {
   return (
     <div className="sat-page">
       <div className="sat-header">
-        <div className="sat-title">Satellite Telemetry</div>
+        <div className="sat-title">┌─ SATELLITE TELEMETRY</div>
         <div className="sat-badges">
           <span className={`sat-dot ${connected ? 'sat-dot-ok' : 'sat-dot-off'}`}>
             WS {connected ? 'connected' : 'disconnected'}

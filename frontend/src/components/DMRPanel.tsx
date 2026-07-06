@@ -106,28 +106,28 @@ export default function DMRPanel() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <div className={`sync-dot ${synced ? 'active' : ''}`} />
         <span className="panel-title">DMR Decode</span>
-        {activeCC > 0 && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#444' }}>CC{activeCC}</span>}
+        {activeCC > 0 && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#3d6b52' }}>CC{activeCC}</span>}
       </div>
 
       {/* Active call info */}
-      <div style={{ marginBottom: 6, paddingBottom: 6, borderBottom: '1px solid #222', fontSize: '0.72rem', minHeight: 38 }}>
+      <div style={{ marginBottom: 6, paddingBottom: 6, borderBottom: '1px solid #0d2418', fontSize: '0.72rem', minHeight: 38 }}>
         {activeSrc ? (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <span className="badge badge-blue">TS{activeTs + 1}</span>
               {activeDst > 0 && (
-                <span style={{ color: '#888' }}>
+                <span style={{ color: '#7fbf9a' }}>
                   TG&nbsp;<span style={{ color: '#fff' }}>{activeDst}</span>
                 </span>
               )}
-              <span style={{ color: '#aaa' }}>ID&nbsp;<span style={{ color: '#fff' }}>{activeSrc}</span></span>
+              <span style={{ color: '#7fbf9a' }}>ID&nbsp;<span style={{ color: '#fff' }}>{activeSrc}</span></span>
             </div>
             <div style={{ marginTop: 3, color: '#00ff88', fontWeight: 'bold', fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {callsignLine}
             </div>
           </>
         ) : (
-          <span style={{ color: '#444', fontSize: '0.7rem' }}>No active call</span>
+          <span style={{ color: '#3d6b52', fontSize: '0.7rem' }}>No active call</span>
         )}
       </div>
 
@@ -138,9 +138,9 @@ export default function DMRPanel() {
             <span className="badge badge-blue">TS{f.timeslot + 1}</span>
             <span className={`badge ${f.frame_type === 'VOICE' ? 'badge-green' : 'badge-grey'}`}>{f.frame_type}</span>
             {f.src_id > 0 && (
-              <span style={{ fontSize: '0.65rem', color: '#aaa' }}>
+              <span style={{ fontSize: '0.65rem', color: '#7fbf9a' }}>
                 {f.alias || f.src_id}
-                {f.dst_id > 0 && <span style={{ color: '#555' }}>→TG{f.dst_id}{f.tg_name ? ` ${f.tg_name}` : ''}</span>}
+                {f.dst_id > 0 && <span style={{ color: '#4d7a62' }}>→TG{f.dst_id}{f.tg_name ? ` ${f.tg_name}` : ''}</span>}
               </span>
             )}
             {f.errors > 0 && <span className="badge badge-red">E:{f.errors}</span>}

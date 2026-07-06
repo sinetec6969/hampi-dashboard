@@ -62,7 +62,7 @@ export default function TrunkPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10, padding: 12 }}>
       <div className="header">
-        <span className="header-title">📡 Trunked DMR</span>
+        <span className="header-title">┌─ TRUNKED DMR</span>
         <span className="header-freq">{((st?.control_freq ?? 454031250) / 1e6).toFixed(5)} MHz control</span>
         <span className={'badge ' + (active && st?.tuner_locked ? 'badge-green' : active && st?.running ? 'badge-amber' : 'badge-red')}>
           {active && st?.tuner_locked ? '● Locked' : active && st?.running ? '◐ Starting' : '○ Idle'}
@@ -76,7 +76,7 @@ export default function TrunkPage() {
         )}
       </div>
 
-      <div style={{ color: '#789', fontSize: 12 }}>{st?.site ?? 'Carolina Connect Site 004'} · Connect Plus (SDRTrunk)</div>
+      <div style={{ color: '#6aa886', fontSize: 12 }}>{st?.site ?? 'Carolina Connect Site 004'} · Connect Plus (SDRTrunk)</div>
 
       {!active && (
         <div className="mode-banner">
@@ -90,32 +90,32 @@ export default function TrunkPage() {
       )}
 
       {active && st?.vnc_url && (
-        <div style={{ fontSize: 12, color: '#888' }}>
-          Full UI over Tailscale VNC: <code style={{ color: '#7fd' }}>{st.vnc_url}</code>
+        <div style={{ fontSize: 12, color: '#7fbf9a' }}>
+          Full UI over Tailscale VNC: <code style={{ color: '#a8e8c4' }}>{st.vnc_url}</code>
         </div>
       )}
 
-      <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #333', background: '#0c0c0c' }}>
-        <div style={{ color: '#888', fontSize: 12, padding: '6px 8px' }}>
-          Decoded calls <span style={{ color: '#555' }}>({recent.length})</span>
+      <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #1d4030', background: '#0c0c0c' }}>
+        <div style={{ color: '#7fbf9a', fontSize: 12, padding: '6px 8px' }}>
+          Decoded calls <span style={{ color: '#4d7a62' }}>({recent.length})</span>
         </div>
         {recent.length === 0 ? (
-          <div style={{ color: '#555', padding: 12 }}>
+          <div style={{ color: '#4d7a62', padding: 12 }}>
             {active ? 'Waiting for the control channel to grant a call…' : 'Switch to Trunk mode to begin decoding.'}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: 'monospace' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: 'inherit' }}>
             <thead>
-              <tr style={{ color: '#3a7', textAlign: 'left' }}>
-                {cols.map(c => <th key={c} style={{ padding: '4px 8px', borderBottom: '1px solid #222' }}>{c}</th>)}
+              <tr style={{ color: '#00b95f', textAlign: 'left' }}>
+                {cols.map(c => <th key={c} style={{ padding: '4px 8px', borderBottom: '1px solid #0d2418' }}>{c}</th>)}
               </tr>
             </thead>
             <tbody>
               {recent.slice().reverse().map((row, i) => (
-                <tr key={i} style={{ color: row._encrypted ? '#f66' : '#ccc' }}>
+                <tr key={i} style={{ color: row._encrypted ? '#f66' : '#a8e8c4' }}>
                   {cols.map(c => (
-                    <td key={c} style={{ padding: '3px 8px', borderBottom: '1px solid #161616', whiteSpace: 'nowrap' }}>
+                    <td key={c} style={{ padding: '3px 8px', borderBottom: '1px solid #07120c', whiteSpace: 'nowrap' }}>
                       {row._encrypted && c === cols[0] && '🔒 '}{String(row[c] ?? '')}
                     </td>
                   ))}

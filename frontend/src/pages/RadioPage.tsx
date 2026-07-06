@@ -41,7 +41,7 @@ export default function RadioPage() {
   return (
     <div style={{ padding: 16, maxWidth: 620 }}>
       <div className="header" style={{ marginBottom: 12 }}>
-        <span className="header-title">📻 Radio TX — Digirig</span>
+        <span className="header-title">┌─ RADIO TX · DIGIRIG</span>
         <span className={'badge ' + (ready ? 'badge-green' : 'badge-red')}>
           {ready ? '● TX READY' : '○ TX DISABLED'}
         </span>
@@ -59,11 +59,11 @@ export default function RadioPage() {
       {st && (
         <table style={{ fontSize: 13, borderSpacing: '12px 4px' }}>
           <tbody>
-            <tr><td style={{ color: '#888' }}>Serial port</td><td>{dot(st.open)} {st.serial}</td></tr>
-            <tr><td style={{ color: '#888' }}>Audio device</td><td>{st.audio || '—'}</td></tr>
-            <tr><td style={{ color: '#888' }}>Callsign</td><td>{st.callsign || <span style={{ color: '#ff5555' }}>not set</span>}</td></tr>
-            <tr><td style={{ color: '#888' }}>tx_enable</td><td>{dot(st.tx_enable)} {String(st.tx_enable)}</td></tr>
-            <tr><td style={{ color: '#888' }}>PTT keyed</td><td>{dot(!!st.keyed)} {st.keyed ? 'TRANSMITTING' : 'idle'}</td></tr>
+            <tr><td style={{ color: '#7fbf9a' }}>Serial port</td><td>{dot(st.open)} {st.serial}</td></tr>
+            <tr><td style={{ color: '#7fbf9a' }}>Audio device</td><td>{st.audio || '—'}</td></tr>
+            <tr><td style={{ color: '#7fbf9a' }}>Callsign</td><td>{st.callsign || <span style={{ color: '#ff5555' }}>not set</span>}</td></tr>
+            <tr><td style={{ color: '#7fbf9a' }}>tx_enable</td><td>{dot(st.tx_enable)} {String(st.tx_enable)}</td></tr>
+            <tr><td style={{ color: '#7fbf9a' }}>PTT keyed</td><td>{dot(!!st.keyed)} {st.keyed ? 'TRANSMITTING' : 'idle'}</td></tr>
           </tbody>
         </table>
       )}
@@ -77,7 +77,7 @@ export default function RadioPage() {
         </button>
       </div>
 
-      <p style={{ color: '#888', fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
+      <p style={{ color: '#7fbf9a', fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
         PTT test keys an unmodulated carrier — watch the radio's TX LED to confirm the Digirig RTS line works.
         The tone keys + plays 1 kHz out the Digirig; set deviation with <code>alsamixer</code> while listening on a second radio.
         RX only on RTL-SDR modes — this page drives the Digirig + radio only.

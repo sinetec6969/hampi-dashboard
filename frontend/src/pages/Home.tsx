@@ -13,7 +13,6 @@ interface SysInfo {
 }
 
 const MEM_KEY = 'hampi-memory-channels'
-const SCAN_KEY = 'hampi-scanlines'
 
 interface MemChannel { id: string; name: string; freq: number; gain: number }
 
@@ -173,16 +172,21 @@ export default function Home() {
   const [info, setInfo] = useState<SysInfo | null>(null)
   const [freq, setFreq] = useState(438_800_000)
   const [gain, setGain] = useState(49.6)
+  const [freqEdit, setFreqEdit] = useState<string | null>(null)
+  const [clients, setClients] = useState<Record<string, number>>({})
   const [sig, setSig] = useState(-100)
   const [snr, setSnr] = useState(0)
   const [now, setNow] = useState(() => Date.now())
   const [mem, setMem] = useState<MemChannel[]>(loadMem)
-  const [scanlines, setScanlines] = useState(() => localStorage.getItem(SCAN_KEY) !== 'off')
 
   useEffect(() => {
     fetch('/api/sysinfo').then(r => r.json()).then(setInfo).catch(() => {})
     const poll = () => fetch('/api/status').then(r => r.json())
-      .then(d => { if (typeof d.freq === 'number') setFreq(d.freq); if (typeof d.gain === 'number') setGain(d.gain) })
+      .then(d => {
+        if (typeof d.freq === 'number') setFreq(d.freq)
+        if (typeof d.gain === 'number') setGain(d.gain)
+        if (d.clients) setClients(d.clients)
+      })
       .catch(() => {})
     poll()
     const s = setInterval(poll, 3000)
@@ -196,15 +200,19 @@ export default function Home() {
     fetch(`/api/tune?${q}`, { method: 'POST' }).catch(() => {})
   }
 
+  function commitFreqEdit() {
+    if (freqEdit === null) return
+    const v = parseFloat(freqEdit.replace(/[^\d.]/g, ''))
+    setFreqEdit(null)
+    if (!isFinite(v) || v <= 0) return
+    tune(v < 10_000 ? v * 1e6 : v)   // "438.8" means MHz, big numbers are Hz
+  }
+
   function saveMem() {
     const name = prompt('Channel name:')
     if (!name?.trim()) return
     const next = [...mem, { id: crypto.randomUUID(), name: name.trim().toUpperCase(), freq, gain }]
     setMem(next); localStorage.setItem(MEM_KEY, JSON.stringify(next))
-  }
-
-  function toggleScanlines() {
-    setScanlines(v => { localStorage.setItem(SCAN_KEY, v ? 'off' : 'on'); return !v })
   }
 
   const match = actualMode !== null && actualMode === intendedMode
@@ -213,7 +221,6 @@ export default function Home() {
 
   return (
     <div className="rx-home" style={{ position: 'relative', background: '#030604' }}>
-      {scanlines && <div className="rx-scanlines" onDoubleClick={toggleScanlines} />}
       <div className="rx-grid" style={{ display: 'grid', gridTemplateColumns: '460px 1fr', height: '100%' }}>
 
         {/* ── LEFT: spectrum ─────────────────────────────────────────── */}
@@ -222,11 +229,31 @@ export default function Home() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 10, letterSpacing: 2, color: '#4d7a62' }}>SPECTRUM · DEV0</span>
               <span style={{ flex: 1 }} />
-              <span style={{ fontSize: 10, color: '#3d6b52' }}>2.4 MHZ FFT · GAIN {gain.toFixed(1)}</span>
+              <span style={{ fontSize: 10, color: '#3d6b52' }}>2.4 MHZ FFT · GAIN</span>
+              <input type="range" min={0} max={50} step={0.1} value={gain}
+                onChange={e => setGain(Number(e.target.value))}
+                onPointerUp={e => tune(freq, Number((e.target as HTMLInputElement).value))}
+                onKeyUp={e => tune(freq, Number((e.target as HTMLInputElement).value))}
+                style={{ width: 70 }} title="RF gain — release to apply" />
+              <span style={{ fontFamily: "'VT323', monospace", fontSize: 15, color: '#7dffb8', width: 34, textAlign: 'right' }}>{gain.toFixed(1)}</span>
             </div>
-            <div style={{ fontFamily: "'VT323', monospace", fontSize: 38, color: '#00ff88', textShadow: '0 0 12px rgba(0,255,136,.6)' }}>
-              {fmtFreq(freq)}<span style={{ fontSize: 19, color: '#4d7a62' }}> HZ</span>
-            </div>
+            {freqEdit !== null ? (
+              <input autoFocus value={freqEdit}
+                onChange={e => setFreqEdit(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') commitFreqEdit(); if (e.key === 'Escape') setFreqEdit(null) }}
+                onBlur={() => setFreqEdit(null)}
+                placeholder="MHz or Hz"
+                style={{
+                  fontFamily: "'VT323', monospace", fontSize: 38, color: '#00ff88', width: '100%',
+                  background: 'transparent', border: 'none', borderBottom: '1px solid #00ff88',
+                  outline: 'none', padding: 0, textShadow: '0 0 12px rgba(0,255,136,.6)',
+                }} />
+            ) : (
+              <div onClick={() => setFreqEdit((freq / 1e6).toString())} title="click to type a frequency — MHz (438.8) or Hz, Enter tunes"
+                style={{ fontFamily: "'VT323', monospace", fontSize: 38, color: '#00ff88', textShadow: '0 0 12px rgba(0,255,136,.6)', cursor: 'text' }}>
+                {fmtFreq(freq)}<span style={{ fontSize: 19, color: '#4d7a62' }}> HZ</span>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#050a07', borderBottom: '1px solid #0d2418', overflowX: 'auto' }}>
@@ -235,6 +262,11 @@ export default function Home() {
               <span key={ch.id} className="rx-mem-chip" onClick={() => tune(ch.freq, ch.gain)}
                 style={{ fontSize: 10, border: '1px solid #1d4030', padding: '2px 7px', color: '#7dffb8', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {ch.name} {(ch.freq / 1e6).toFixed(4)}
+                <span className="rx-mem-del" onClick={e => {
+                  e.stopPropagation()
+                  const next = mem.filter(c => c.id !== ch.id)
+                  setMem(next); localStorage.setItem(MEM_KEY, JSON.stringify(next))
+                }} title="delete channel" style={{ marginLeft: 5, color: '#3d6b52' }}>×</span>
               </span>
             ))}
             <span className="rx-save-chip" onClick={saveMem}
@@ -408,6 +440,7 @@ export default function Home() {
             <span>host <span style={{ color: '#7fbf9a' }}>{info?.hostname ?? 'hampi.local'}</span></span>
             {info?.local_ip && <span>local <span style={{ color: '#7fbf9a' }}>{info.local_ip}:8000</span></span>}
             {info?.tailscale_ip && <span>tailscale <span style={{ color: '#7fbf9a' }}>{info.tailscale_ip}:8000</span></span>}
+            <span title="connected browsers: waterfall / DMR metadata">clients <span style={{ color: '#7fbf9a' }}>wf:{clients.waterfall || 0} dmr:{clients.dmr || 0}</span></span>
             <span style={{ marginLeft: 'auto' }}>
               ver <span style={{ color: '#7fbf9a' }}>{info?.version ?? '0.9-b3t5'}</span> · <a href="https://github.com/sinetec6969/hampi-dashboard" target="_blank" rel="noreferrer" style={{ color: '#7fbf9a' }}>github</a>
             </span>

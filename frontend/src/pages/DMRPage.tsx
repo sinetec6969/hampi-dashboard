@@ -35,7 +35,7 @@ export default function DMRPage() {
   return (
     <>
       <div className="header">
-        <span className="header-title">🛰 HamPi SDR</span>
+        <span className="header-title">┌─ DMR VOICE</span>
         <span className="header-freq">{(freq / 1e6).toFixed(4)} MHz</span>
         <Controls
           freq={freq} gain={gain}
@@ -47,7 +47,7 @@ export default function DMRPage() {
       <div className="main">
         <div className="left-col">
           <div className="waterfall-wrap">
-            <Waterfall centerFreqHz={freq} onClickTune={f => tuneTo(f, gain)} />
+            <Waterfall centerFreqHz={freq} palette="green" onClickTune={f => tuneTo(f, gain)} />
           </div>
           <div className="bottom-row">
             <DMRPanel />

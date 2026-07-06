@@ -40,12 +40,19 @@ const NAV_LINKS = [
   { to: '/satellite',   label: 'Satellite' },
 ]
 
+const SCAN_KEY = 'hampi-scanlines'
+
 export default function App() {
   const isMobile = useIsMobile()
+  const [scanlines, setScanlines] = useState(() => localStorage.getItem(SCAN_KEY) !== 'off')
+  function toggleScanlines() {
+    setScanlines(v => { localStorage.setItem(SCAN_KEY, v ? 'off' : 'on'); return !v })
+  }
   return (
     <div className={`app-shell${isMobile ? ' mobile' : ''}`}>
+      {scanlines && <div className="rx-scanlines" />}
       <nav className="app-nav">
-        <NavLink to="/" end className="app-nav-brand">🛰 HamPi</NavLink>
+        <NavLink to="/" end className="app-nav-brand">▚ HAMPI://RX</NavLink>
         <div className="app-nav-links">
           {NAV_LINKS.map(l => (
             <NavLink
@@ -57,6 +64,10 @@ export default function App() {
             </NavLink>
           ))}
         </div>
+        <button onClick={toggleScanlines} title="CRT scanlines" style={{
+          background: 'none', border: '1px solid #1d4030', color: scanlines ? '#00ff88' : '#3d6b52',
+          cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, padding: '3px 7px', marginLeft: 'auto', marginRight: 8,
+        }}>▦</button>
         <ModeLock />
       </nav>
       <div className="app-content">

@@ -25,7 +25,7 @@ interface Aircraft {
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 function altColor(alt: number | null): string {
-  if (alt === null) return '#888'
+  if (alt === null) return '#7fbf9a'
   if (alt <  2000) return '#44ff88'
   if (alt < 10000) return '#44ccff'
   if (alt < 25000) return '#4488ff'
@@ -187,7 +187,7 @@ export default function ADSBPage() {
   return (
     <div className="adsb-page">
       <div className="adsb-header">
-        <span className="adsb-header-title">✈ ADS-B Aircraft</span>
+        <span className="adsb-header-title">┌─ ADS-B</span>
         <span className="adsb-count">{count} tracked</span>
         <span className={'badge ' + (connected ? 'badge-green' : 'badge-red')}>
           {connected ? '● Live' : '○ Offline'}
@@ -274,7 +274,7 @@ export default function ADSBPage() {
                 <span className="adsb-detail-val" style={{
                   color: selAc.vrate === null ? undefined
                        : selAc.vrate > 100 ? '#44ff88'
-                       : selAc.vrate < -100 ? '#ff4444'
+                       : selAc.vrate < -100 ? '#ff3355'
                        : undefined
                 }}>
                   {fmtVr(selAc.vrate)}

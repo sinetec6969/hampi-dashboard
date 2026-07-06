@@ -80,10 +80,10 @@ function fmtTs(ts: number): string {
 }
 
 function battColor(pct: number | null): string {
-  if (pct == null) return '#555'
+  if (pct == null) return '#4d7a62'
   if (pct > 50)   return '#00ff88'
   if (pct > 20)   return '#ffaa00'
-  return '#ff4444'
+  return '#ff3355'
 }
 
 function byteLen(s: string): number {
@@ -94,7 +94,7 @@ function byteLen(s: string): number {
 
 function nodeIcon(node: MeshNode) {
   const online = isOnline(node)
-  const color  = node.is_local ? '#ff88ff' : online ? '#44ccff' : '#444'
+  const color  = node.is_local ? '#ff88ff' : online ? '#44ccff' : '#3d6b52'
   const glow   = node.is_local ? '#ff88ff' : online ? '#44ccff' : 'transparent'
   return L.divIcon({
     html: `<div style="width:11px;height:11px;background:${color};border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px ${glow},0 0 2px #fff"></div>`,
@@ -278,7 +278,7 @@ export default function MeshtasticPage() {
 
       {/* Header */}
       <div className="mesh-header">
-        <span className="mesh-title">🕸 Meshtastic</span>
+        <span className="mesh-title">┌─ MESHTASTIC</span>
         <div className="mesh-header-right">
           <span className={`mesh-conn-dot ${status.connected ? 'connected' : ''}`} />
           <span className="mesh-conn-text">
@@ -357,12 +357,12 @@ export default function MeshtasticPage() {
                 eventHandlers={{ click: () => setSelected(node.node_id) }}
               >
                 <Popup>
-                  <div style={{ fontFamily: 'monospace', minWidth: 160 }}>
+                  <div style={{ fontFamily: 'inherit', minWidth: 160 }}>
                     <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#0ea5e9' }}>{node.short_name}</div>
                     {node.long_name && <div style={{ fontSize: '0.82rem', marginTop: 2 }}>{node.long_name}</div>}
-                    <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 4 }}>{node.node_id}</div>
-                    {node.hw_model && <div style={{ fontSize: '0.7rem', color: '#666', marginTop: 2 }}>{node.hw_model}</div>}
-                    <div style={{ fontSize: '0.7rem', marginTop: 6, borderTop: '1px solid #eee', paddingTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '0.7rem', color: '#7fbf9a', marginTop: 4 }}>{node.node_id}</div>
+                    {node.hw_model && <div style={{ fontSize: '0.7rem', color: '#58a67a', marginTop: 2 }}>{node.hw_model}</div>}
+                    <div style={{ fontSize: '0.7rem', marginTop: 6, borderTop: '1px solid #c8ffe0', paddingTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {node.battery_level != null && <span>🔋 {node.battery_level}%</span>}
                       {node.snr != null && <span>SNR {node.snr?.toFixed(1)}</span>}
                       {node.altitude != null && <span>Alt {node.altitude} m</span>}

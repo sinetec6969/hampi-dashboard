@@ -95,7 +95,7 @@ export default function AX25Page() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 8 }}>
       <div className="header">
-        <span className="header-title">📟 AX.25 Terminal</span>
+        <span className="header-title">┌─ AX.25 TERMINAL</span>
         <span className="header-freq">{(freq / 1e6).toFixed(4)} MHz</span>
         <Controls
           freq={freq} gain={gain}
@@ -120,16 +120,16 @@ export default function AX25Page() {
       )}
 
       <div style={{ height: 200, flexShrink: 0 }}>
-        <Waterfall centerFreqHz={freq} onClickTune={f => tuneTo(f, gain)} />
+        <Waterfall centerFreqHz={freq} palette="green" onClickTune={f => tuneTo(f, gain)} />
       </div>
 
       <div style={{
         flex: 1, minHeight: 120, overflowY: 'auto', background: '#000',
-        border: '1px solid #333', padding: 8, fontSize: 12,
+        border: '1px solid #1d4030', padding: 8, fontSize: 12,
         whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#33ff66',
       }}>
         {frames.length === 0 ? (
-          <span style={{ color: '#555' }}>
+          <span style={{ color: '#4d7a62' }}>
             {active
               ? 'Monitoring. Frames print here as direwolf decodes them — click the waterfall or type a frequency to retune the whole chain. Zero frames on a 70cm whip is normal; 2m antenna pending.'
               : 'The terminal wakes up in APRS mode — one direwolf feeds both pages.'}

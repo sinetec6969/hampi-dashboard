@@ -146,7 +146,7 @@ export default function APRSPage() {
   return (
     <div className="adsb-page">
       <div className="adsb-header">
-        <span className="adsb-header-title" style={{ color: '#ff8844' }}>📻 APRS 144.390</span>
+        <span className="adsb-header-title" style={{ color: '#ff8844' }}>┌─ APRS 144.390</span>
         <span className="adsb-count">{Object.keys(stations).length} stations · {packets.length || frames} pkts</span>
         <span className={'badge ' + (connected ? 'badge-green' : 'badge-red')}>
           {connected ? '● Live' : '○ Offline'}
@@ -242,11 +242,11 @@ export default function APRSPage() {
                     ))
                 )}
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', borderTop: '1px solid #333', fontSize: 11, padding: 4 }}>
+              <div style={{ flex: 1, overflowY: 'auto', borderTop: '1px solid #1d4030', fontSize: 11, padding: 4 }}>
                 {packets.map((p, i) => (
-                  <div key={i} style={{ padding: '2px 0', borderBottom: '1px solid #222' }}>
+                  <div key={i} style={{ padding: '2px 0', borderBottom: '1px solid #0d2418' }}>
                     <span style={{ color: '#ff8844' }}>{p.from}</span>{' '}
-                    <span style={{ color: '#888' }}>{ago(p.ts)}</span>{' '}
+                    <span style={{ color: '#7fbf9a' }}>{ago(p.ts)}</span>{' '}
                     <span>{pktSummary(p)}</span>
                   </div>
                 ))}

@@ -115,7 +115,7 @@ export default function AirbandPage() {
     <div className="airband-page">
       {/* Header */}
       <div className="airband-header">
-        <span className="airband-title">🛩 Airband AM</span>
+        <span className="airband-title">┌─ AIRBAND AM</span>
         <div className="airband-header-right">
           {enabled ? (
             <>
@@ -169,7 +169,7 @@ export default function AirbandPage() {
                 onChange={e => applySquelch(parseFloat(e.target.value))}
                 style={{ flex: 1 }}
               />
-              <span style={{ fontSize: '0.72rem', color: '#888', minWidth: 36 }}>
+              <span style={{ fontSize: '0.72rem', color: '#7fbf9a', minWidth: 36 }}>
                 {squelch.toFixed(3)}
               </span>
             </div>
@@ -185,11 +185,11 @@ export default function AirbandPage() {
                 onChange={e => setDwell(parseInt(e.target.value))}
                 style={{ flex: 1 }}
               />
-              <span style={{ fontSize: '0.72rem', color: '#888', minWidth: 42 }}>
+              <span style={{ fontSize: '0.72rem', color: '#7fbf9a', minWidth: 42 }}>
                 {(dwell / 1000).toFixed(1)} s
               </span>
             </div>
-            <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#555' }}>
+            <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#4d7a62' }}>
               Dwell changes apply after next channel rotation
             </div>
           </div>

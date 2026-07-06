@@ -151,7 +151,7 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
   }
 
   const dot: Record<Status, string> = {
-    stopped: '#888', connecting: '#ffaa00', streaming: '#00ff88',
+    stopped: '#7fbf9a', connecting: '#ffaa00', streaming: '#00ff88',
   }
 
   return (
@@ -173,7 +173,7 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
         </div>
       )}
       {err && (
-        <div className="status-line" style={{ color: '#ff4444', marginTop: 4 }}>{err}</div>
+        <div className="status-line" style={{ color: '#ff3355', marginTop: 4 }}>{err}</div>
       )}
     </div>
   )
