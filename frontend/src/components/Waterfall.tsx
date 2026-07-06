@@ -4,6 +4,8 @@ import { useEffect, useRef } from 'react'
 interface Props {
   centerFreqHz: number
   onClickTune?: (freq: number) => void
+  palette?: 'classic' | 'green'
+  onStats?: (sig: number, snr: number) => void
 }
 
 const MIN_DB = -100, MAX_DB = -20, N_FFT = 1024, BW = 2.4e6
@@ -17,7 +19,14 @@ function dbToRgb(db: number): [number, number, number] {
   const s = (t - 0.8) / 0.2; return [255, Math.round(255 * (1 - s)), 0]
 }
 
-export default function Waterfall({ centerFreqHz, onClickTune }: Props) {
+function dbToRgbGreen(db: number): [number, number, number] {
+  const t = Math.max(0, Math.min(1, (db - MIN_DB) / (MAX_DB - MIN_DB)))
+  if (t < 0.45) { const s = t / 0.45;         return [0, Math.round(90 * s), Math.round(45 * s)] }
+  if (t < 0.8)  { const s = (t - 0.45) / 0.35; return [0, Math.round(90 + 165 * s), Math.round(45 + 91 * s)] }
+  const s = (t - 0.8) / 0.2; return [Math.round(220 * s), 255, Math.round(136 + 119 * s)]
+}
+
+export default function Waterfall({ centerFreqHz, onClickTune, palette = 'classic', onStats }: Props) {
   const displayRef   = useRef<HTMLCanvasElement>(null)
   const pingRef      = useRef<HTMLCanvasElement | null>(null)
   const pongRef      = useRef<HTMLCanvasElement | null>(null)
@@ -34,6 +43,12 @@ export default function Waterfall({ centerFreqHz, onClickTune }: Props) {
 
   const centerFreqRef = useRef(centerFreqHz)
   centerFreqRef.current = centerFreqHz
+
+  const paletteRef = useRef(palette)
+  paletteRef.current = palette
+  const onStatsRef = useRef(onStats)
+  onStatsRef.current = onStats
+  const lastStatsRef = useRef(0)
 
   useEffect(() => {
     const display   = displayRef.current
@@ -89,24 +104,42 @@ export default function Waterfall({ centerFreqHz, onClickTune }: Props) {
 
         dctx.drawImage(src, 0, 0, N_FFT, h - 1, 0, 1, N_FFT, h - 1)
 
+        const paint = paletteRef.current === 'green' ? dbToRgbGreen : dbToRgb
         const img = dctx.createImageData(N_FFT, 1)
         for (let i = 0; i < N_FFT; i++) {
-          const [r, g, b] = dbToRgb(row[i])
+          const [r, g, b] = paint(row[i])
           img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255
         }
         dctx.putImageData(img, 0, 0)
 
         pingRef.current = dst
         pongRef.current = src
+
+        // SIG = peak dBFS, SNR = peak − noise floor (median). Throttle to ~4 Hz.
+        const now = performance.now()
+        if (onStatsRef.current && now - lastStatsRef.current > 250) {
+          lastStatsRef.current = now
+          let peak = -Infinity
+          const sorted = Array.prototype.slice.call(row).sort((a: number, b: number) => a - b)
+          for (const v of row) if (v > peak) peak = v
+          const floor = sorted[sorted.length >> 1]
+          onStatsRef.current(peak, Math.max(0, peak - floor))
+        }
       }
 
       ctx.drawImage(pingRef.current!, 0, 0, display.width, display.height)
 
       // Frequency axis
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'
-      ctx.fillRect(0, h - 18, display.width, 18)
-      ctx.fillStyle = '#aaa'; ctx.font = '10px monospace'; ctx.textAlign = 'center'
+      const green = paletteRef.current === 'green'
       const cf = centerFreqRef.current
+      if (green) {
+        ctx.strokeStyle = 'rgba(0,255,136,0.35)'
+        ctx.lineWidth = 1
+        ctx.beginPath(); ctx.moveTo(display.width / 2, 0); ctx.lineTo(display.width / 2, h - 16); ctx.stroke()
+      }
+      ctx.fillStyle = green ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.6)'
+      ctx.fillRect(0, h - (green ? 16 : 18), display.width, green ? 16 : 18)
+      ctx.fillStyle = green ? '#4d7a62' : '#aaa'; ctx.font = "10px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center'
       for (const t of [-1.0, -0.5, 0, 0.5, 1.0]) {
         const x = ((t + 1) / 2) * display.width
         ctx.fillText(((cf + t * BW / 2) / 1e6).toFixed(3) + 'M', x, h - 4)

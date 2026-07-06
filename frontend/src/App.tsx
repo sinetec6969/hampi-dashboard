@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
 import './App.css'
+import ModeLock from './components/ModeLock'
 import Home from './pages/Home'
 import DMRPage from './pages/DMRPage'
 import TrunkPage from './pages/TrunkPage'
@@ -23,31 +24,6 @@ function useIsMobile() {
     return () => mq.removeEventListener('change', handler)
   }, [])
   return isMobile
-}
-
-const MODE_LABEL: Record<string, string> = {
-  dmr: 'DMR', airband: 'AIRBAND', adsb: 'ADS-B', sstv: 'SSTV',
-  aprs: 'APRS', meteor: 'METEOR', trunk: 'TRUNK',
-}
-
-// Which mode device 0 is in, visible from every page — it's the #1 answer
-// to "why is this page empty".
-function SdrModeBadge() {
-  const [mode, setMode] = useState('')
-  useEffect(() => {
-    let alive = true
-    const poll = () => fetch('/api/sdr/mode').then(r => r.json())
-      .then(d => { if (alive) setMode(d.mode) }).catch(() => { if (alive) setMode('') })
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [])
-  return (
-    <NavLink to="/" end className="sdr-pill" title="Device 0's current mode — change it on the home page">
-      <span className="sdr-pill-label">SDR</span>
-      <span className={'sdr-pill-mode' + (mode ? '' : ' off')}>{mode ? MODE_LABEL[mode] ?? mode : '—'}</span>
-    </NavLink>
-  )
 }
 
 const NAV_LINKS = [
@@ -81,7 +57,7 @@ export default function App() {
             </NavLink>
           ))}
         </div>
-        <SdrModeBadge />
+        <ModeLock />
       </nav>
       <div className="app-content">
         <Routes>
