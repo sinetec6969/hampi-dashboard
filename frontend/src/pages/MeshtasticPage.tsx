@@ -54,6 +54,42 @@ interface MeshStatus {
   local_id:   string | null
 }
 
+interface TraceHop {
+  num: number
+  id:  string
+  snr: number | null
+}
+
+interface TraceRoute {
+  target:   string
+  local:    string
+  towards:  TraceHop[]
+  back?:    TraceHop[]
+  received: number   // client receive time (ms)
+}
+
+interface RangeTestConfig {
+  available: boolean
+  enabled:   boolean
+  sender:    number
+  save:      boolean
+}
+
+interface ProbeSample {
+  t:    number          // ms
+  snr:  number | null   // SNR at target on the forward path
+  hops: number          // intermediate hop count (0 = direct)
+}
+
+interface ProbeState {
+  target:  string
+  running: boolean
+  sent:    number
+  samples: ProbeSample[]
+}
+
+const PROBE_INTERVAL_S = 30   // firmware rate-limits traceroute to ~30 s
+
 const MAX_MSG_BYTES = 228
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -88,6 +124,31 @@ function battColor(pct: number | null): string {
 
 function byteLen(s: string): number {
   return new TextEncoder().encode(s).length
+}
+
+function fmtSnr(v: number | null): string {
+  if (v == null) return '?'
+  return `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
+}
+
+function Sparkline({ samples }: { samples: ProbeSample[] }) {
+  const withSnr = samples.filter(s => s.snr != null)
+  if (withSnr.length < 2) return null
+  const W = 180, H = 34
+  const vals = withSnr.map(s => s.snr as number)
+  const min  = Math.min(...vals, -18)
+  const max  = Math.max(...vals, 6)
+  const span = max - min || 1
+  const pts  = withSnr.map((s, i) => {
+    const x = (i / (withSnr.length - 1)) * (W - 2) + 1
+    const y = H - 1 - ((s.snr as number - min) / span) * (H - 2)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  return (
+    <svg width={W} height={H} style={{ display: 'block', marginTop: 4 }}>
+      <polyline points={pts} fill="none" stroke="#00ff88" strokeWidth="1.5" />
+    </svg>
+  )
 }
 
 // ── Map helpers ───────────────────────────────────────────────────────────
@@ -136,11 +197,22 @@ export default function MeshtasticPage() {
   const [sending,   setSending]   = useState(false)
   const [sendError, setSendError] = useState('')
 
+  // tools state
+  const [traces,  setTraces]  = useState<Record<string, TraceRoute>>({})
+  const [tracing, setTracing] = useState<string | null>(null)   // target id awaiting reply
+  const [probe,   setProbe]   = useState<ProbeState | null>(null)
+  const [rt,      setRt]      = useState<RangeTestConfig>({ available: false, enabled: false, sender: 0, save: false })
+  const [rtSaving, setRtSaving] = useState(false)
+  const [rtSamples, setRtSamples] = useState<Array<{ seq: string; from: string; snr: number | null; rssi: number | null; t: number }>>([])
+
   const wsRef      = useRef<WebSocket | null>(null)
   const msgEndRef  = useRef<HTMLDivElement | null>(null)
   const inputRef   = useRef<HTMLInputElement | null>(null)
   const aliveRef   = useRef(true)
   const retryRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const probeTargetRef = useRef<string | null>(null)   // mirror for the stable WS closure
+  const probeTimerRef  = useRef<ReturnType<typeof setInterval> | null>(null)
+  const traceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── WebSocket ─────────────────────────────────────────────────────────
 
@@ -173,6 +245,30 @@ export default function MeshtasticPage() {
               prev.some(m => m.id === msg.message.id) ? prev : [...prev, msg.message]
             )
             break
+          case 'traceroute': {
+            const tr: TraceRoute = { ...msg.traceroute, received: Date.now() }
+            setTraces(prev => ({ ...prev, [tr.target]: tr }))
+            setTracing(t => (t === tr.target ? null : t))
+            if (probeTargetRef.current === tr.target) {
+              const dest = tr.towards[tr.towards.length - 1]
+              setProbe(p => p && p.target === tr.target ? {
+                ...p,
+                samples: [...p.samples, {
+                  t:    tr.received,
+                  snr:  dest?.snr ?? null,
+                  hops: Math.max(0, tr.towards.length - 2),
+                }],
+              } : p)
+            }
+            break
+          }
+          case 'range_test': {
+            const s = msg.sample
+            setRtSamples(prev => [{
+              seq: s.seq, from: s.from_short || s.from_id, snr: s.snr, rssi: s.rssi, t: s.timestamp * 1000,
+            }, ...prev].slice(0, 12))
+            break
+          }
         }
       } catch { /* ignore */ }
     }
@@ -265,6 +361,73 @@ export default function MeshtasticPage() {
     if (e.key === 'Escape') setSelected(null)
   }
 
+  // ── Traceroute / probe / range test ─────────────────────────────────────
+
+  const fireTraceroute = useCallback(async (target: string): Promise<boolean> => {
+    try {
+      const r = await fetch('/api/meshtastic/traceroute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destination: target }),
+      })
+      return r.ok
+    } catch { return false }
+  }, [])
+
+  async function runTraceroute(target: string) {
+    if (tracing) return
+    setTracing(target)
+    if (traceTimeoutRef.current) clearTimeout(traceTimeoutRef.current)
+    traceTimeoutRef.current = setTimeout(() => setTracing(t => (t === target ? null : t)), 40000)
+    const ok = await fireTraceroute(target)
+    if (!ok) setTracing(t => (t === target ? null : t))
+  }
+
+  function stopProbe() {
+    if (probeTimerRef.current) { clearInterval(probeTimerRef.current); probeTimerRef.current = null }
+    probeTargetRef.current = null
+    setProbe(p => (p ? { ...p, running: false } : p))
+  }
+
+  function startProbe(target: string) {
+    stopProbe()
+    probeTargetRef.current = target
+    setProbe({ target, running: true, sent: 0, samples: [] })
+    const tick = () => {
+      setProbe(p => (p ? { ...p, sent: p.sent + 1 } : p))
+      fireTraceroute(target)
+    }
+    tick()
+    probeTimerRef.current = setInterval(tick, PROBE_INTERVAL_S * 1000)
+  }
+
+  // Fetch RangeTest module config on connect
+  useEffect(() => {
+    if (!status.connected) return
+    fetch('/api/meshtastic/rangetest').then(r => r.json()).then(setRt).catch(() => {})
+  }, [status.connected])
+
+  async function applyRangeTest(next: Partial<RangeTestConfig>) {
+    const body = { enabled: rt.enabled, sender: rt.sender, save: rt.save, ...next }
+    setRtSaving(true)
+    try {
+      const r = await fetch('/api/meshtastic/rangetest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (r.ok) setRt(c => ({ ...c, ...body }))
+    } catch { /* ignore */ } finally {
+      setRtSaving(false)
+    }
+  }
+
+  // Stop probe timer on unmount
+  useEffect(() => () => {
+    if (probeTimerRef.current) clearInterval(probeTimerRef.current)
+    if (traceTimeoutRef.current) clearTimeout(traceTimeoutRef.current)
+  }, [])
+
   // ── Derived ───────────────────────────────────────────────────────────
 
   const sorted  = [...nodes].sort((a, b) => (b.last_heard ?? 0) - (a.last_heard ?? 0))
@@ -335,8 +498,140 @@ export default function MeshtasticPage() {
                   {node.humidity != null && ` · 💧${node.humidity.toFixed(0)}%`}
                 </div>
               )}
+
+              {selected === node.node_id && !node.is_local && (
+                <div className="mesh-node-tools" onClick={e => e.stopPropagation()}>
+                  <div className="mesh-tool-btns">
+                    <button
+                      className="btn mesh-tool-btn"
+                      disabled={!status.connected || tracing === node.node_id}
+                      onClick={() => runTraceroute(node.node_id)}
+                    >
+                      {tracing === node.node_id ? 'tracing…' : '⇄ traceroute'}
+                    </button>
+                    {probe?.target === node.node_id && probe.running ? (
+                      <button className="btn mesh-tool-btn stop" onClick={stopProbe}>■ stop probe</button>
+                    ) : (
+                      <button
+                        className="btn mesh-tool-btn"
+                        disabled={!status.connected || (probe?.running ?? false)}
+                        onClick={() => startProbe(node.node_id)}
+                      >
+                        ▶ probe ({PROBE_INTERVAL_S}s)
+                      </button>
+                    )}
+                  </div>
+
+                  {traces[node.node_id] && (
+                    <div className="mesh-trace">
+                      <div className="mesh-trace-line">
+                        {traces[node.node_id].towards.map((h, i) => (
+                          <span key={i}>
+                            {i > 0 && <span className="mesh-trace-arrow"> → </span>}
+                            <span className="mesh-trace-hop">
+                              {h.id === status.local_id ? 'you' : (nodes.find(n => n.num === h.num)?.short_name ?? h.id.slice(-4))}
+                            </span>
+                            {i > 0 && <span className="mesh-trace-snr"> {fmtSnr(h.snr)}dB</span>}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="mesh-trace-meta">
+                        {Math.max(0, traces[node.node_id].towards.length - 2)} hop{traces[node.node_id].towards.length - 2 === 1 ? '' : 's'} · {fmtAge(traces[node.node_id].received / 1000)}
+                      </div>
+                    </div>
+                  )}
+
+                  {probe?.target === node.node_id && (
+                    <div className="mesh-probe">
+                      {(() => {
+                        const snrs = probe.samples.map(s => s.snr).filter((v): v is number => v != null)
+                        const recv = probe.samples.length
+                        const loss = probe.sent > 0 ? Math.round((1 - recv / probe.sent) * 100) : 0
+                        const last = snrs.length ? snrs[snrs.length - 1] : null
+                        const avg  = snrs.length ? snrs.reduce((a, b) => a + b, 0) / snrs.length : null
+                        const mn   = snrs.length ? Math.min(...snrs) : null
+                        return (
+                          <>
+                            <div className="mesh-probe-stats">
+                              <span>{recv}/{probe.sent} replies</span>
+                              <span className={loss > 30 ? 'warn' : ''}>{loss}% loss</span>
+                              {last != null && <span>last {fmtSnr(last)}</span>}
+                              {avg  != null && <span>avg {fmtSnr(avg)}</span>}
+                              {mn   != null && <span>min {fmtSnr(mn)}</span>}
+                            </div>
+                            <Sparkline samples={probe.samples} />
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
+
+          {/* Range Test module (local node) */}
+          <div className="mesh-rangetest">
+            <div className="mesh-section-title" style={{ padding: '8px 0 4px' }}>
+              Range Test module
+              <span className={`mesh-rt-badge ${rt.enabled ? 'on' : ''}`}>
+                {!rt.available ? 'n/a' : rt.enabled ? (rt.sender > 0 ? `sender ${rt.sender}s` : 'receiver') : 'off'}
+              </span>
+            </div>
+            {rt.available ? (
+              <>
+                <div className="mesh-rt-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={rt.enabled}
+                      disabled={rtSaving || !status.connected}
+                      onChange={e => applyRangeTest({ enabled: e.target.checked })}
+                    /> enabled
+                  </label>
+                  <select
+                    className="mesh-rt-sel"
+                    value={rt.sender}
+                    disabled={rtSaving || !status.connected}
+                    onChange={e => applyRangeTest({ sender: Number(e.target.value) })}
+                    title="0 = receiver-only; >0 = broadcast interval"
+                  >
+                    <option value={0}>receiver</option>
+                    <option value={15}>send 15s</option>
+                    <option value={30}>send 30s</option>
+                    <option value={60}>send 60s</option>
+                    <option value={300}>send 5m</option>
+                  </select>
+                  <label title="Log received range-test packets to the device">
+                    <input
+                      type="checkbox"
+                      checked={rt.save}
+                      disabled={rtSaving || !status.connected}
+                      onChange={e => applyRangeTest({ save: e.target.checked })}
+                    /> save
+                  </label>
+                </div>
+                <div className="mesh-rt-warn">Applying reboots the radio.</div>
+                {rtSamples.length > 0 && (
+                  <div className="mesh-rt-feed">
+                    {rtSamples.map((s, i) => (
+                      <div key={i} className="mesh-rt-sample">
+                        <span className="mesh-msg-time">{fmtTs(s.t / 1000)}</span>
+                        <span className="mesh-rt-from">{s.from}</span>
+                        <span className="mesh-rt-seq">#{s.seq}</span>
+                        {s.snr != null && <span>SNR {fmtSnr(s.snr)}</span>}
+                        {s.rssi != null && <span>{s.rssi}dBm</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="mesh-empty" style={{ padding: '4px 0' }}>
+                {status.connected ? 'Module config unavailable' : 'Connect a radio to configure'}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Map */}

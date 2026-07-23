@@ -81,6 +81,55 @@ def _node_from_iface(raw: dict, local_id: Optional[int] = None) -> dict:
     }
 
 
+def _parse_traceroute(packet: dict, decoded: dict) -> Optional[dict]:
+    """
+    Decode a TRACEROUTE_APP response into forward/back paths with per-node SNR.
+
+    Direction follows the firmware convention (see MeshInterface.onResponseTraceRoute):
+      towards = local --> route[…] --> target   (snr_towards has len(route)+1 entries)
+      back    = target --> route_back[…] --> local
+    snr_towards[i] is the SNR at the node that received that hop, so it aligns to
+    the path node *after* the origin — origin itself has no incoming SNR (None).
+    """
+    payload = decoded.get("payload")
+    if not payload:
+        return None
+    try:
+        from meshtastic.protobuf import mesh_pb2
+        rd = mesh_pb2.RouteDiscovery()
+        rd.ParseFromString(payload)
+    except Exception:
+        logger.debug("traceroute parse failed", exc_info=True)
+        return None
+
+    UNK = -128  # firmware sentinel for unknown SNR
+
+    def snr(v: int) -> Optional[float]:
+        return None if v == UNK else v / 4
+
+    local  = packet.get("to", 0)     # response destination = us
+    target = packet.get("from", 0)   # response origin = the traced node
+
+    def path(a: int, hops: list, snrs: list, b: int) -> list[dict]:
+        nums = [a] + list(hops) + [b]
+        if len(snrs) == len(hops) + 1:
+            aligned = [None] + [snr(s) for s in snrs]
+        else:
+            aligned = [None] * len(nums)
+        return [{"num": n, "id": f"!{n:08x}", "snr": s} for n, s in zip(nums, aligned)]
+
+    tr = {
+        "target":  f"!{target:08x}",
+        "local":   f"!{local:08x}",
+        "towards": path(local, rd.route, list(rd.snr_towards), target),
+    }
+    back = path(target, rd.route_back, list(rd.snr_back), local)
+    # Only include the return path when its SNR count lines up (hopStart was set)
+    if len(rd.snr_back) == len(rd.route_back) + 1:
+        tr["back"] = back
+    return tr
+
+
 class MeshtasticHandler:
     """
     Manages one Meshtastic USB serial connection.
@@ -316,6 +365,26 @@ class MeshtasticHandler:
             if self._packet_cb:
                 await self._packet_cb({"type": "message", "message": msg})
 
+        elif portnum == "TRACEROUTE_APP":
+            tr = _parse_traceroute(packet, decoded)
+            if tr and self._packet_cb:
+                await self._packet_cb({"type": "traceroute", "traceroute": tr})
+
+        elif portnum == "RANGE_TEST_APP":
+            payload = decoded.get("payload", b"")
+            seq = payload.decode("utf-8", "ignore") if isinstance(payload, (bytes, bytearray)) else str(payload)
+            if self._packet_cb:
+                await self._packet_cb({"type": "range_test", "sample": {
+                    "seq":        seq,
+                    "from_id":    node["node_id"],
+                    "from_short": node["short_name"],
+                    "snr":        snr,
+                    "rssi":       rssi,
+                    "lat":        node.get("lat"),
+                    "lon":        node.get("lon"),
+                    "timestamp":  now,
+                }})
+
         self.nodes[node["node_id"]] = node
         if self._packet_cb:
             await self._packet_cb({"type": "node_update", "node": node})
@@ -380,3 +449,52 @@ class MeshtasticHandler:
             ),
         )
         logger.info("Sent text to=%s ch=%d: %r", destination, channel, text[:60])
+
+    async def traceroute(self, destination: str, hop_limit: int = 7, channel: int = 0) -> None:
+        """
+        Fire a traceroute. sendTraceRoute blocks on the reply (or its timeout);
+        the decoded route arrives async via the TRACEROUTE_APP receive handler,
+        so callers get the result on the WebSocket, not from this call.
+
+        Firmware rate-limits traceroute to roughly once per 30 s — fire faster
+        and the mesh silently drops the request.
+        """
+        if not self.connected or self._iface is None:
+            raise RuntimeError("Not connected to Meshtastic device")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: self._iface.sendTraceRoute(destination, hop_limit, channelIndex=channel),
+        )
+        logger.info("Traceroute sent to=%s hop_limit=%d", destination, hop_limit)
+
+    def get_range_test_config(self) -> dict:
+        """Current RangeTest module config from the local node."""
+        if self._iface is None:
+            return {"available": False, "enabled": False, "sender": 0, "save": False}
+        try:
+            rt = self._iface.localNode.moduleConfig.range_test
+            return {"available": True, "enabled": rt.enabled, "sender": rt.sender, "save": rt.save}
+        except Exception:
+            logger.debug("get_range_test_config failed", exc_info=True)
+            return {"available": False, "enabled": False, "sender": 0, "save": False}
+
+    async def set_range_test_config(self, enabled: bool, sender: int, save: bool) -> None:
+        """
+        Write the RangeTest module config to the local node. sender = broadcast
+        interval in seconds (0 = receiver-only). writeConfig applies it and the
+        node reboots to take effect.
+        """
+        if not self.connected or self._iface is None:
+            raise RuntimeError("Not connected to Meshtastic device")
+
+        def _write() -> None:
+            node = self._iface.localNode
+            node.moduleConfig.range_test.enabled = enabled
+            node.moduleConfig.range_test.sender  = sender
+            node.moduleConfig.range_test.save    = save
+            node.writeConfig("range_test")
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _write)
+        logger.info("RangeTest config written: enabled=%s sender=%d save=%s", enabled, sender, save)

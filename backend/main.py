@@ -1354,6 +1354,49 @@ async def api_mesh_send(body: MeshSendBody):
     return {"ok": True}
 
 
+class MeshTracerouteBody(BaseModel):
+    destination: str
+    hop_limit: int = 7
+    channel: int = 0
+
+
+@app.post("/api/meshtastic/traceroute")
+async def api_mesh_traceroute(body: MeshTracerouteBody):
+    if meshtastic is None or not meshtastic.connected:
+        raise HTTPException(status_code=503, detail="Meshtastic not connected")
+    try:
+        await meshtastic.traceroute(body.destination, body.hop_limit, body.channel)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"ok": True}
+
+
+@app.get("/api/meshtastic/rangetest")
+async def api_mesh_rangetest_get():
+    if meshtastic is None:
+        return {"available": False, "enabled": False, "sender": 0, "save": False}
+    return meshtastic.get_range_test_config()
+
+
+class MeshRangeTestBody(BaseModel):
+    enabled: bool
+    sender: int = 0   # broadcast interval in seconds; 0 = receiver-only
+    save: bool = True
+
+
+@app.post("/api/meshtastic/rangetest")
+async def api_mesh_rangetest_set(body: MeshRangeTestBody):
+    if meshtastic is None or not meshtastic.connected:
+        raise HTTPException(status_code=503, detail="Meshtastic not connected")
+    if body.sender < 0:
+        raise HTTPException(status_code=400, detail="sender interval must be >= 0")
+    try:
+        await meshtastic.set_range_test_config(body.enabled, body.sender, body.save)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # ADS-B WebSocket + REST endpoints
 # ---------------------------------------------------------------------------

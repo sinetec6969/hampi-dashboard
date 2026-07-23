@@ -221,6 +221,34 @@ input[type=range] { accent-color: #00ff88; }
 .mesh-node-long { font-size: 0.72rem; color: #7fbf9a; padding-left: 13px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mesh-node-meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.65rem; color: #4d7a62; padding-left: 13px; }
 
+/* Node tools: traceroute + probe */
+.mesh-node-tools { margin: 6px 0 2px 13px; padding-top: 6px; border-top: 1px dashed #14301f; }
+.mesh-tool-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.mesh-tool-btn { font-size: 0.66rem; padding: 3px 7px; }
+.mesh-tool-btn.stop { color: #ff3355; border-color: #5a1622; }
+.mesh-trace { margin-top: 6px; font-size: 0.68rem; }
+.mesh-trace-line { color: #a8e8c4; line-height: 1.5; word-break: break-word; }
+.mesh-trace-arrow { color: #3d6b52; }
+.mesh-trace-hop { color: #44ccff; }
+.mesh-trace-snr { color: #4d7a62; font-size: 0.62rem; }
+.mesh-trace-meta { color: #3d6b52; font-size: 0.62rem; margin-top: 2px; }
+.mesh-probe { margin-top: 6px; }
+.mesh-probe-stats { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.66rem; color: #7fbf9a; }
+.mesh-probe-stats .warn { color: #ffaa00; }
+
+/* Range Test module */
+.mesh-rangetest { padding: 4px 10px 12px; border-top: 1px solid #0d2418; }
+.mesh-rt-badge { font-size: 0.6rem; margin-left: 6px; padding: 1px 5px; color: #3d6b52; background: #0d2418; }
+.mesh-rt-badge.on { color: #00ff88; background: #07160e; border: 1px solid #14301f; }
+.mesh-rt-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.7rem; color: #7fbf9a; }
+.mesh-rt-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.mesh-rt-sel { background: #0d2418; color: #7fbf9a; border: 1px solid #1d4030; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; padding: 2px 4px; }
+.mesh-rt-warn { font-size: 0.62rem; color: #ffaa00; margin-top: 4px; }
+.mesh-rt-feed { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.mesh-rt-sample { display: flex; gap: 8px; align-items: baseline; font-size: 0.66rem; color: #a8e8c4; }
+.mesh-rt-from { color: #44ccff; font-weight: bold; }
+.mesh-rt-seq { color: #3d6b52; }
+
 /* Map */
 .mesh-map { flex: 1; min-width: 0; position: relative; }
 
