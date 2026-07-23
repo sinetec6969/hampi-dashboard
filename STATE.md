@@ -1,6 +1,6 @@
 # Project State — snapshot
 
-**Version:** 0.9-b3t5 · **Updated:** 2026-07-06 · **QTH:** EM95of (Charlotte NC) · **Call:** KR4BPW
+**Version:** 0.9-b3t6 · **Code Named HamPi** · **Updated:** 2026-07-23 · **QTH:** EM95of (Charlotte NC) · **Call:** KR4BPW
 
 A single Raspberry Pi 4 + one RTL-SDR Blog V4, all decoding on-device, no cloud.
 Every claim below was exercised on hardware 2026-07-05/06 — see [AUDIT.md](AUDIT.md)

@@ -40,24 +40,67 @@ def _is_encrypted(row: dict) -> bool:
     return any("encrypt" in str(v).lower() for v in row.values())
 
 
+def build_playlist(sys: dict) -> str:
+    """Render a one-channel SDRTrunk playlist for a trunked system.
+
+    Con+ and Cap+ both use the generic DMR decoder — SDRTrunk auto-detects the
+    trunking flavor from the control channel, so the same template covers all.
+    Each frequency maps to two timeslots (LSN); control freqs are the tuner's
+    rotating source set.
+    """
+    control = [int(f) for f in sys.get("control", [])]
+    voice   = [int(f) for f in sys.get("voice", [])]
+    freqs   = control + voice
+    src = "\n".join(f"      <frequency>{f}</frequency>" for f in control)
+    ts = "\n".join(
+        f'      <timeslot lsn="{i*2+1}" downlink="{f}" uplink="0"/>\n'
+        f'      <timeslot lsn="{i*2+2}" downlink="{f}" uplink="0"/>'
+        for i, f in enumerate(freqs))
+    name = sys["name"]
+    return f'''<playlist version="4">
+  <alias group="Unmapped" color="0" name="All Talkgroups" list="{name}">
+    <id type="talkgroupRange" protocol="DMR" min="1" max="16777215"/>
+    <id type="record"/>
+  </alias>
+  <channel system="{name}" name="Control" site="{sys.get('site', '')}" enabled="true" order="1">
+    <alias_list_name>{name}</alias_list_name>
+    <event_log_configuration>
+      <logger>CALL_EVENT</logger>
+      <logger>TRAFFIC_CALL_EVENT</logger>
+    </event_log_configuration>
+    <source_configuration type="sourceConfigTunerMultipleFrequency" frequency_rotation_delay="200" source_type="TUNER_MULTIPLE_FREQUENCIES">
+{src}
+    </source_configuration>
+    <aux_decode_configuration/>
+    <decode_configuration type="decodeConfigDMR" traffic_channel_pool_size="{max(1, len(voice))}" ignore_crc="false" use_compressed_talkgroups="false" ignore_data_calls="true">
+{ts}
+    </decode_configuration>
+    <record_configuration/>
+  </channel>
+</playlist>'''
+
+
 class TrunkMonitor:
     def __init__(
         self,
         app_dir: str,
         service: str = "sdrtrunk",
-        site: str = "Site 004",
-        control_freq: int = 454_031_250,
+        systems: Optional[list[dict]] = None,
+        active: str = "",
+        playlist_path: str = "~/SDRTrunk/playlist/default.xml",
         vnc_url: str = "",
         status_callback: Optional[StatusCb] = None,
         event_callback: Optional[EventCb] = None,
     ):
-        self.app_dir      = app_dir
-        self.service      = service
-        self.site         = site
-        self.control_freq = control_freq
-        self.vnc_url      = vnc_url
-        self._status_cb   = status_callback
-        self._event_cb    = event_callback
+        self.app_dir       = app_dir
+        self.service       = service
+        self.systems       = systems or []
+        self.active        = active if any(s["name"] == active for s in self.systems) \
+                             else (self.systems[0]["name"] if self.systems else "")
+        self.playlist_path = os.path.expanduser(playlist_path)
+        self.vnc_url       = vnc_url
+        self._status_cb    = status_callback
+        self._event_cb     = event_callback
 
         self.running        = False
         self.tuner_locked   = False
@@ -66,6 +109,33 @@ class TrunkMonitor:
         self._csv_path  = ""
         self._csv_rows  = 0                # data rows already consumed
         self._poll_task: Optional[asyncio.Task] = None
+
+    def _sys(self) -> dict:
+        return next((s for s in self.systems if s["name"] == self.active),
+                    self.systems[0] if self.systems else {})
+
+    def _write_playlist(self) -> None:
+        s = self._sys()
+        if not s:
+            return
+        os.makedirs(os.path.dirname(self.playlist_path), exist_ok=True)
+        with open(self.playlist_path, "w") as f:
+            f.write(build_playlist(s))
+        logger.info("TrunkMonitor wrote playlist for %s", self.active)
+
+    async def set_system(self, name: str) -> None:
+        if not any(s["name"] == name for s in self.systems):
+            raise ValueError(f"unknown trunked system: {name}")
+        self.active = name
+        self.encrypted_seen = False
+        self._recent = []
+        if self.running:
+            await self._systemctl("stop")
+            self._write_playlist()
+            await self._systemctl("start")
+            self._latest_csv(seek_end=True)
+        else:
+            self._write_playlist()
 
     async def _systemctl(self, action: str) -> None:
         proc = await asyncio.create_subprocess_exec(
@@ -88,13 +158,14 @@ class TrunkMonitor:
         return out.decode().strip() == "active"
 
     async def start(self) -> None:
+        self._write_playlist()
         await self._systemctl("start")
         # Baseline: skip call events already in the newest CSV so we only emit
         # calls decoded during this session.
         self._latest_csv(seek_end=True)
         self.running = True
         self._poll_task = asyncio.create_task(self._poll_loop(), name="trunk-poll")
-        logger.info("TrunkMonitor started — service=%s site=%s", self.service, self.site)
+        logger.info("TrunkMonitor started — service=%s system=%s", self.service, self.active)
 
     async def stop(self) -> None:
         self.running = False
@@ -109,12 +180,18 @@ class TrunkMonitor:
         logger.info("TrunkMonitor stopped")
 
     def status_dict(self) -> dict:
+        s = self._sys()
+        control = s.get("control", [])
         return {
             "type":          "status",
             "running":       self.running,
             "tuner_locked":  self.tuner_locked,
-            "site":          self.site,
-            "control_freq":  self.control_freq,
+            "system":        self.active,
+            "systems":       [x["name"] for x in self.systems],
+            "site":          s.get("site", ""),
+            "protocol":      s.get("protocol", ""),
+            "control_freq":  int(control[0]) if control else 0,
+            "color_code":    s.get("color_code"),
             "encrypted_seen": self.encrypted_seen,
             "vnc_url":       self.vnc_url,
             "recent":        self._recent[-30:],

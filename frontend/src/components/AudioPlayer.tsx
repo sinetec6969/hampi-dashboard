@@ -14,6 +14,7 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
   const [status, setStatus] = useState<Status>('stopped')
   const [mode,   setMode]   = useState<Mode>('worklet')
   const [err,    setErr]    = useState('')
+  const [stats,  setStats]  = useState<{depth_ms: number, target_ms: number, underruns: number} | null>(null)
 
   const ctxRef     = useRef<AudioContext | null>(null)
   const wsRef      = useRef<WebSocket | null>(null)
@@ -26,11 +27,14 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
   async function startWorklet(ctx: AudioContext) {
     await ctx.audioWorklet.addModule('/audio-processor.js')
 
-    const targetSamples = Math.round(ctx.sampleRate * 0.10)
+    const targetSamples = Math.round(ctx.sampleRate * 0.15)
     const worklet = new AudioWorkletNode(ctx, 'pcm-processor', {
       processorOptions: { targetSamples },
     })
     worklet.connect(ctx.destination)
+    worklet.port.onmessage = ({ data }) => {
+      if (data && typeof data.depth_ms === 'number') setStats(data)
+    }
     workletRef.current = worklet
 
     const ratio = ctx.sampleRate / inputRate
@@ -61,7 +65,9 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
   // Scheduled-buffer fallback (HTTP non-localhost)
   // -----------------------------------------------------------------------
   function startScheduled(ctx: AudioContext) {
-    nextTimeRef.current = ctx.currentTime + 0.1
+    // 200 ms margin: dsd-fme emits audio in bursts with gaps up to ~106 ms
+    // (measured), plus browser-side network jitter on top.
+    nextTimeRef.current = ctx.currentTime + 0.2
 
     // Resample manually to ctx.sampleRate — don't rely on browser resampling
     // of AudioBuffer, which is inconsistent across Chromium/mobile builds and
@@ -170,6 +176,8 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
       {status === 'streaming' && (
         <div className="status-line" style={{ marginTop: 8 }}>
           {mode === 'worklet' ? 'AudioWorklet' : 'scheduled'}
+          {mode === 'worklet' && stats &&
+            ` — buf ${stats.depth_ms}/${stats.target_ms}ms, underruns ${stats.underruns}`}
         </div>
       )}
       {err && (

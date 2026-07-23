@@ -85,14 +85,22 @@ AUDIO_UDP_PORT = 23456
 class _AudioProtocol(asyncio.DatagramProtocol):
     """Receives dsd-fme UDP blaster PCM; queues it for ordered delivery."""
 
-    def __init__(self, queue: asyncio.Queue):
-        self._queue = queue
+    def __init__(self, queue: asyncio.Queue, stats: dict):
+        self._queue  = queue
+        self._stats  = stats
+        self._last_t = 0.0
 
     def datagram_received(self, data: bytes, addr) -> None:
+        # TEMP instrumentation (Part 1A diagnosis) — remove after audio fix
+        now = time.monotonic()
+        if self._last_t and now - self._last_t < 0.5:
+            self._stats["gaps"].append(now - self._last_t)
+        self._last_t = now
+        self._stats["sizes"].append(len(data))
         try:
             self._queue.put_nowait(data)
         except asyncio.QueueFull:
-            pass
+            self._stats["drops"] += 1
 
 
 @dataclass
@@ -127,6 +135,7 @@ class DMRDecoder:
         self._tasks:      list[asyncio.Task] = []
         self._udp_transport = None
         self._audio_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._audio_stats: dict = {"gaps": [], "sizes": [], "drops": 0}
 
         # Per-slot persistent call context (1-indexed: slot 1 and 2)
         self._slot_ctx: dict[int, dict] = {
@@ -154,7 +163,7 @@ class DMRDecoder:
         if self._audio_cb and self._udp_transport is None:
             loop = asyncio.get_running_loop()
             self._udp_transport, _ = await loop.create_datagram_endpoint(
-                lambda: _AudioProtocol(self._audio_queue),
+                lambda: _AudioProtocol(self._audio_queue, self._audio_stats),
                 local_addr=("127.0.0.1", AUDIO_UDP_PORT),
             )
             logger.info("DMR audio UDP listener on 127.0.0.1:%d", AUDIO_UDP_PORT)
@@ -211,6 +220,23 @@ class DMRDecoder:
         try:
             self._proc.stdin.write(pcm_bytes)
             await self._proc.stdin.drain()
+            # TEMP instrumentation (Part 1A): tee discriminator PCM for offline
+            # dsd-fme flag experiments; capped at 60 MB (~10 min)
+            if not hasattr(self, "_tee"):
+                self._tee = open("/tmp/dmr_input.pcm", "wb")
+                self._tee_n = 0
+            if self._tee and self._tee_n < 60_000_000:
+                self._tee.write(pcm_bytes)
+                self._tee_n += len(pcm_bytes)
+            # TEMP instrumentation (Part 1A): input rate — expect 96000 B/s (48k s16)
+            self._in_bytes = getattr(self, "_in_bytes", 0) + len(pcm_bytes)
+            now = time.monotonic()
+            t0 = getattr(self, "_in_t0", 0.0)
+            if now - t0 >= 10:
+                if t0:
+                    logger.info("DMR input: %d B/s to dsd-fme stdin",
+                                int(self._in_bytes / (now - t0)))
+                self._in_bytes, self._in_t0 = 0, now
         except (BrokenPipeError, ConnectionResetError, asyncio.CancelledError):
             logger.warning("dsd-fme stdin pipe broken")
 
@@ -228,8 +254,22 @@ class DMRDecoder:
                 rate_bytes += len(data)
                 now = time.monotonic()
                 if now - rate_t0 >= 10:
-                    logger.info("DMR audio: %d B/s from dsd-fme UDP",
-                                int(rate_bytes / (now - rate_t0)))
+                    # TEMP instrumentation (Part 1A diagnosis)
+                    st = self._audio_stats
+                    gaps, sizes = sorted(st["gaps"]), st["sizes"]
+                    if gaps:
+                        p = lambda q: gaps[min(len(gaps) - 1, int(q * len(gaps)))]
+                        logger.info(
+                            "DMR audio: %d B/s | %d dgrams sz min/med/max=%d/%d/%d | "
+                            "gap ms p50/p90/p99/max=%.1f/%.1f/%.1f/%.1f | qdrops=%d",
+                            int(rate_bytes / (now - rate_t0)), len(sizes),
+                            min(sizes), sorted(sizes)[len(sizes)//2], max(sizes),
+                            p(.5)*1e3, p(.9)*1e3, p(.99)*1e3, gaps[-1]*1e3,
+                            st["drops"])
+                    else:
+                        logger.info("DMR audio: %d B/s from dsd-fme UDP",
+                                    int(rate_bytes / (now - rate_t0)))
+                    st["gaps"], st["sizes"], st["drops"] = [], [], 0
                     rate_bytes, rate_t0 = 0, now
                 try:
                     await self._audio_cb(data)
@@ -243,12 +283,15 @@ class DMRDecoder:
         if self._proc is None or self._proc.stderr is None:
             return
 
+        # TEMP instrumentation (Part 1A): raw stderr tee for MBE-error analysis
+        raw_log = open("/tmp/dsdfme_stderr.log", "ab", buffering=0)
         try:
             while True:
                 line_bytes = await self._proc.stderr.readline()
                 if not line_bytes:
                     logger.info("dsd-fme stderr closed")
                     break
+                raw_log.write(line_bytes)
                 line = line_bytes.decode("ascii", errors="replace")
 
                 frame = self._parse_line(line)

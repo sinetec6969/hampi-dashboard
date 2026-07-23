@@ -6,7 +6,7 @@
 ![RTL-SDR](https://img.shields.io/badge/RTL--SDR-Blog_V4-ff6600?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Raspberry_Pi-c51a4a?style=flat-square&logo=raspberry-pi&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.9--b3t5-blueviolet?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.9--b3t6_HamPi-blueviolet?style=flat-square)
 ![Status](https://img.shields.io/badge/status-beta-orange?style=flat-square)
 
 ---
@@ -33,6 +33,7 @@ Digital voice decoded. Aircraft tracked. Mesh nodes mapped. Weather satellites i
 | 🌍 METEOR LRPT | ⏳ Waiting on a pass | 137 MHz QPSK via SatDump · decoder verified running · first MSU-MR composite needs a satellite overhead |
 | 🌐 Meshtastic LoRa | ✅ Live | node map · messages · send/DM — 204-node mesh on the bench |
 | 🛰️ Satellite telemetry | ✅ Live | TinyGS board → local MQTT · packet feed with hex dump |
+| 🕐 HamClock | ✅ Live | OpenHamClock on-device (port 3001) · propagation, DX, greyline · `/hamclock` page + home widget · config generated locally |
 | 📊 Waterfall | ✅ Live | 2.4 MHz FFT · click-to-tune · memory channels |
 | 📱 Mobile | ✅ Live | responsive layout, phone-first tested |
 | 📶 Radio TX (Phase A) | 🚧 Started, not RF-confirmed | Digirig PTT + tone calibration page. A valid APRS beacon left the software; nobody has yet seen the radio's TX LED. Honest status: **not done.** |
@@ -293,6 +294,19 @@ Same device index. Give them EEPROM serials (see udev section).
 
 ## Version history
 
+### 0.9-b3t6 — 2026-07-23 · Code Named HamPi
+The polish release. **OpenHamClock** folded in as a first-class page (`/hamclock`)
+with an on-device config generator ([gen_hamclock_config.py](backend/gen_hamclock_config.py)) —
+no cloud, runs on port 3001. Matrix motif applied across every page; RX home
+redesigned with live feeds, a mode-lock light, and honest empty states. Deep-links
+and hard-reloads on subpages no longer 404 (SPA fallback fixed). DMR live audio
+re-prime bug fixed and the audio worklet hardened; SDRTrunk encryption-flag and
+call-log handling improved; BrandMeister talkgroup aliases ([talkgroups_bm.json](talkgroups_bm.json))
+added.
+
+<details>
+<summary>Earlier releases</summary>
+
 ### 0.9-b3t5 — 2026-07-06
 The audit release. Every feature exercised on hardware and classified in
 [AUDIT.md](AUDIT.md); four bugs found and fixed (rtl_tcp zombie on kill-timeout,
@@ -302,9 +316,6 @@ shared status indicators, honest empty states, mode switcher front and center.
 Since 0.9-b3t4: **METEOR LRPT** (SatDump), **SSTV satellite tracking** (Doppler
 auto-tune), **trunked DMR** (SDRTrunk Connect Plus), **DMR live audio** (UDP
 blaster), and **TX Phase A** started — beacon built, RF unconfirmed.
-
-<details>
-<summary>Earlier releases</summary>
 
 ### 0.9-b3t4 — 2026-06-12 · BETA
 Every numbered roadmap item shipped. AX.25 packet terminal (KISS on the shared

@@ -4,6 +4,7 @@ import { wsUrl } from '../ws'
 import { useMode, SDR_MODES, type SdrMode } from '../mode'
 import Waterfall from '../components/Waterfall'
 import SignalMeters from '../components/SignalMeters'
+import AudioPlayer from '../components/AudioPlayer'
 
 interface SysInfo {
   hostname: string
@@ -135,6 +136,37 @@ function useMeshFeed() {
   return { nodeCount, messages }
 }
 
+// ── HamClock feed (solar/band data via backend proxy to local OpenHamClock) ──
+interface BandCond { name: string; time: string; condition: string }
+interface HamClockData {
+  sfi: string | null; a: string | null; k: string | null
+  bands: BandCond[]; callsign: string; grid: string
+}
+
+function useHamClock() {
+  const [data, setData] = useState<HamClockData | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = () => fetch('/api/hamclock').then(r => r.ok ? r.json() : null).then(j => {
+      if (!alive || !j) return
+      setData({
+        sfi: j.solarData?.solarFlux ?? null,
+        a:   j.solarData?.aIndex ?? null,
+        k:   j.solarData?.kIndex ?? null,
+        bands: j.bandConditions || [],
+        callsign: j.station?.callsign || '',
+        grid: j.station?.grid || '',
+      })
+    }).catch(() => {})
+    load()
+    const t = setInterval(load, 300_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  return data
+}
+
+const COND_COLOR: Record<string, string> = { Good: '#00ff88', Fair: '#ffb000', Poor: '#ff3355' }
+
 // ── mode cards ────────────────────────────────────────────────────────────────
 interface CardDef { name: string; path: string; sub: string; sdr?: SdrMode; shared?: boolean; independent?: boolean }
 const CARDS: CardDef[] = [
@@ -168,6 +200,7 @@ export default function Home() {
   const { actualMode, intendedMode, setIntendedMode, switching, switchErr, switchMode } = useMode()
   const dmr = useDmrFeed()
   const mesh = useMeshFeed()
+  const hc = useHamClock()
 
   const [info, setInfo] = useState<SysInfo | null>(null)
   const [freq, setFreq] = useState(438_800_000)
@@ -284,6 +317,43 @@ export default function Home() {
             />
             <div style={{ position: 'absolute', bottom: 22, left: 12, fontSize: 9, letterSpacing: 1, color: '#3d6b52', pointerEvents: 'none' }}>CLICK-TO-TUNE</div>
           </div>
+
+          {/* active DMR caller — bottom half */}
+          <div style={{ flex: 1, minHeight: 0, borderTop: '1px solid #123322', background: '#040805', display: 'flex', flexDirection: 'column', padding: '10px 14px', gap: 10, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 10, letterSpacing: 2, color: '#4d7a62' }}>┌─ ACTIVE CALLER · DMR</span>
+              <span style={{ flex: 1, borderTop: '1px solid #123322' }} />
+              {dmr.active
+                ? <span className="rx-blink" style={{ fontSize: 10, letterSpacing: 1, color: '#00ff88' }}>▶ RX</span>
+                : <span style={{ fontSize: 10, letterSpacing: 1, color: '#3d6b52' }}>STANDBY</span>}
+            </div>
+
+            {dmr.active ? (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, minHeight: 0 }}>
+                <div style={{ fontSize: 11, letterSpacing: 2, color: '#4d7a62' }}>TALKGROUP</div>
+                <div style={{ fontFamily: "'VT323', monospace", fontSize: 44, lineHeight: 1, color: '#00ff88', textShadow: '0 0 14px rgba(0,255,136,.5)' }}>
+                  TG {dmr.active.tg}
+                </div>
+                {dmr.active.tgName && (
+                  <div style={{ fontSize: 15, color: '#c8ffe0' }}>{dmr.active.tgName}</div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 6 }}>
+                  <span style={{ fontSize: 11, letterSpacing: 2, color: '#4d7a62' }}>CALLER</span>
+                  <span style={{ fontFamily: "'VT323', monospace", fontSize: 26, color: '#7dffb8' }}>{dmr.active.callsign || dmr.active.id}</span>
+                  <span style={{ fontFamily: "'VT323', monospace", fontSize: 26, color: '#00ff88', marginLeft: 'auto' }}>{fmtDur(now - dmr.active.startMs)}</span>
+                </div>
+                <div style={{ fontSize: 10, color: '#3d6b52' }}>RADIO ID {dmr.active.id}</div>
+              </div>
+            ) : (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3d6b52', fontSize: 12 }}>
+                {actualMode === 'dmr' ? 'no active caller — channel idle' : 'dev0 not in DMR mode'}
+              </div>
+            )}
+
+            <div style={{ flexShrink: 0 }}>
+              <AudioPlayer wsPath="/ws/dmr-audio" inputRate={8000} label="DMR AUDIO" />
+            </div>
+          </div>
         </div>
 
         {/* ── RIGHT ──────────────────────────────────────────────────── */}
@@ -354,7 +424,7 @@ export default function Home() {
           </div>
 
           {/* feeds row */}
-          <div className="rx-feeds" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: '#0d2418', borderBottom: '1px solid #0d2418' }}>
+          <div className="rx-feeds" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: '#0d2418', borderBottom: '1px solid #0d2418' }}>
             {/* DMR VOICE */}
             <div style={{ background: '#040805', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
               <PanelHead title="DMR VOICE" meta={
@@ -397,6 +467,37 @@ export default function Home() {
                   <div style={{ color: '#6aa886', padding: '2px 0 0 60px' }}>{m.text}</div>
                 </div>
               ))}
+            </div>
+            {/* HAMCLOCK */}
+            <div onClick={() => navigate('/hamclock')} style={{ background: '#040805', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 7, cursor: 'pointer' }}>
+              <PanelHead title="HAMCLOCK" meta={
+                <span style={{ fontFamily: "'VT323', monospace", fontSize: 17, color: '#7dffb8' }}>
+                  {new Date(now).toISOString().slice(11, 19)} UTC
+                </span>
+              } />
+              {hc ? (
+                <>
+                  <div style={{ display: 'flex', gap: 14, fontSize: 11, padding: '2px 2px' }}>
+                    <span style={{ color: '#3d6b52' }}>SFI <b style={{ color: '#c8ffe0' }}>{hc.sfi ?? '—'}</b></span>
+                    <span style={{ color: '#3d6b52' }}>A <b style={{ color: '#c8ffe0' }}>{hc.a ?? '—'}</b></span>
+                    <span style={{ color: '#3d6b52' }}>K <b style={{ color: '#c8ffe0' }}>{hc.k ?? '—'}</b></span>
+                    <span style={{ marginLeft: 'auto', color: '#7fbf9a' }}>{hc.callsign} · {hc.grid}</span>
+                  </div>
+                  {Array.from(new Set(hc.bands.map(b => b.name))).map(name => {
+                    const day   = hc.bands.find(b => b.name === name && b.time === 'day')
+                    const night = hc.bands.find(b => b.name === name && b.time === 'night')
+                    return (
+                      <div key={name} style={{ display: 'flex', gap: 10, fontSize: 11, padding: '3px 2px', borderBottom: '1px dotted #0d2418' }}>
+                        <span style={{ color: '#a8e8c4', width: 74 }}>{name}</span>
+                        <span style={{ color: COND_COLOR[day?.condition ?? ''] || '#3d6b52', flex: 1 }}>☀ {day?.condition ?? '—'}</span>
+                        <span style={{ color: COND_COLOR[night?.condition ?? ''] || '#3d6b52', flex: 1 }}>☾ {night?.condition ?? '—'}</span>
+                      </div>
+                    )
+                  })}
+                </>
+              ) : (
+                <div style={{ fontSize: 10, color: '#3d6b52', padding: '4px 2px' }}>no data — openhamclock service offline</div>
+              )}
             </div>
           </div>
 

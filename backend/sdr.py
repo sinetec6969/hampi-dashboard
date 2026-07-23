@@ -199,6 +199,19 @@ class SDREngine:
             np.ndarray of shape (n_samples,), dtype=complex64
         """
         raw = self._recv_exactly(n_samples * 2)
+        # TEMP instrumentation (Part 1A): raw IQ tee for offline demod A/B —
+        # armed by /tmp/iq_tee_on flag file, capped at 300 MB (~62 s @ 2.4 MS/s)
+        try:
+            import os
+            if os.path.exists("/tmp/iq_tee_on"):
+                if not hasattr(self, "_iqtee"):
+                    self._iqtee = open("/tmp/iq_capture.raw", "wb")
+                    self._iqtee_n = 0
+                if self._iqtee_n < 300_000_000:
+                    self._iqtee.write(raw)
+                    self._iqtee_n += len(raw)
+        except Exception:
+            pass
         u8 = np.frombuffer(raw, dtype=np.uint8).astype(np.float32)
         u8 = (u8 - 127.5) / 127.5
         return (u8[0::2] + 1j * u8[1::2]).astype(np.complex64)

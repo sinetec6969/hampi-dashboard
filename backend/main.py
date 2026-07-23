@@ -146,16 +146,32 @@ METEOR_IMAGE_DIR: str  = os.getenv("METEOR_IMAGE_DIR", cfg("meteor.image_dir",
 TRUNK_APP_DIR:  str = os.getenv("TRUNK_APP_DIR", cfg("trunk.app_dir",
     os.path.join(os.path.expanduser("~"), "SDRTrunk")))
 TRUNK_SERVICE:  str = os.getenv("TRUNK_SERVICE", cfg("trunk.service", "sdrtrunk"))
-TRUNK_SITE:     str = os.getenv("TRUNK_SITE",    cfg("trunk.site", "Carolina Connect Site 004"))
-TRUNK_CONTROL:  int = int(os.getenv("TRUNK_CONTROL", cfg("trunk.control_freq", 454031250)))
+TRUNK_PLAYLIST: str = os.getenv("TRUNK_PLAYLIST", cfg("trunk.playlist", "~/SDRTrunk/playlist/default.xml"))
+TRUNK_SYSTEMS:  list = cfg("trunk.systems", [])   # each: name, site, protocol, color_code, control[], voice[]
+TRUNK_ACTIVE:   str = os.getenv("TRUNK_SYSTEM", cfg("trunk.active",
+    TRUNK_SYSTEMS[0]["name"] if TRUNK_SYSTEMS else ""))
 TRUNK_VNC_URL:  str = os.getenv("TRUNK_VNC_URL",  cfg("trunk.vnc_url", ""))
+
+
+def _trunk_sys(name: str) -> dict:
+    return next((s for s in TRUNK_SYSTEMS if s["name"] == name),
+                TRUNK_SYSTEMS[0] if TRUNK_SYSTEMS else {})
 
 # City→coords geocoding for the DMR caller map hits nominatim.openstreetmap.org —
 # who you're hearing leaves the LAN. Off unless explicitly enabled.
 GEOCODE_ENABLE: bool = cfg_bool("GEOCODE_ENABLE", "geocode.enable", 0)
 
-# DMR talkgroup aliases (config.yaml `talkgroups:` map) + offline RadioID DB
-TALKGROUPS: dict[int, str] = {int(k): str(v) for k, v in (cfg("talkgroups", None) or {}).items()}
+# DMR talkgroup names: Brandmeister list (talkgroups_bm.json — refresh from
+# api.brandmeister.network/v2/talkgroup/) as the base, config.yaml `talkgroups:`
+# overrides on top.
+_BM_TG_PATH = os.path.join(os.path.dirname(__file__), "..", "talkgroups_bm.json")
+try:
+    with open(_BM_TG_PATH) as _f:
+        TALKGROUPS: dict[int, str] = {int(k): v for k, v in json.load(_f).items() if v}
+    logger.info("Loaded %d Brandmeister talkgroups", len(TALKGROUPS))
+except FileNotFoundError:
+    TALKGROUPS = {}
+TALKGROUPS.update({int(k): str(v) for k, v in (cfg("talkgroups", None) or {}).items()})
 
 _RADIOID_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "radioid.db")
 _radioid_db: Optional[sqlite3.Connection] = None
@@ -184,6 +200,7 @@ adsb_decoder:  Optional[ADSBDecoder]      = None  # dedicated-dongle ADS-B
 _mode_airband: Optional[AirbandScanner]   = None  # mode-switched airband on device 0
 _mode_adsb:    Optional[ADSBDecoder]      = None  # mode-switched ADS-B on device 0
 active_sdr_mode: str                      = "dmr"
+active_trunk_system: str                  = TRUNK_ACTIVE
 sdr_task: Optional[asyncio.Task]          = None
 _mode_lock = asyncio.Lock()  # serializes /api/sdr/mode — device 0 has one owner
 
@@ -286,8 +303,23 @@ async def on_airband_audio(pcm: bytes) -> None:
     await broadcast_bytes(airband_clients, pcm)
 
 
+# TEMP instrumentation (Part 1A diagnosis) — remove after audio fix
+_dmr_ws_stat = {"n": 0, "tot": 0.0, "max": 0.0, "t0": 0.0}
+
 async def on_dmr_audio(pcm: bytes) -> None:
+    t0 = time.monotonic()
     await broadcast_bytes(dmr_audio_clients, pcm)
+    dt = time.monotonic() - t0
+    s = _dmr_ws_stat
+    s["n"] += 1
+    s["tot"] += dt
+    s["max"] = max(s["max"], dt)
+    if t0 - s["t0"] >= 10:
+        if s["t0"] and dmr_audio_clients:
+            logger.info("DMR WS send: %d msgs, avg=%.2fms max=%.2fms, clients=%d",
+                        s["n"], s["tot"] / s["n"] * 1e3, s["max"] * 1e3,
+                        len(dmr_audio_clients))
+        s["n"], s["tot"], s["max"], s["t0"] = 0, 0.0, 0.0, t0
 
 
 async def on_airband_status(status: dict) -> None:
@@ -485,14 +517,19 @@ async def sdr_loop() -> None:
     logger.info("SDR loop started — freq=%d Hz, gain=%.1f dB", sdr.freq, sdr.gain)
     step        = CHUNK_SIZE // FFT_PER_CHUNK
     read_future = None
+    # TEMP instrumentation (Part 1A): per-stage wall time, expect iter ≈ 54.6 ms
+    st = {"read": 0.0, "fft": 0.0, "demod": 0.0, "write": 0.0,
+          "iter_max": 0.0, "n": 0, "t0": time.monotonic()}
     try:
         while True:
             try:
+                t_iter = time.monotonic()
                 # First pass or after reconnect: no read in flight yet — block once.
                 if read_future is None:
                     iq = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
                 else:
                     iq = await read_future
+                t1 = time.monotonic()
 
                 # Kick off the next read immediately so it runs while we demodulate.
                 read_future = loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
@@ -501,11 +538,31 @@ async def sdr_loop() -> None:
                 for k in range(FFT_PER_CHUNK):
                     fft_bins = sdr.compute_fft(iq[k * step:], n_fft=N_FFT)
                     await broadcast_bytes(waterfall_clients, fft_bins.tobytes())
+                t2 = time.monotonic()
 
                 # Demodulate current chunk (runs concurrently with read_future).
                 pcm = await loop.run_in_executor(None, sdr.fm_demodulate, iq, sdr.freq)
+                t3 = time.monotonic()
                 await decoder.write_audio(pcm)
+                t4 = time.monotonic()
                 await asyncio.sleep(0)
+
+                st["read"]  += t1 - t_iter
+                st["fft"]   += t2 - t1
+                st["demod"] += t3 - t2
+                st["write"] += t4 - t3
+                st["iter_max"] = max(st["iter_max"], t4 - t_iter)
+                st["n"] += 1
+                if t4 - st["t0"] >= 10:
+                    n = st["n"]
+                    logger.info(
+                        "SDR loop: %d iters, avg ms read=%.1f fft+wf=%.1f demod=%.1f "
+                        "write=%.1f | iter avg=%.1f max=%.1f (real-time=54.6)",
+                        n, st["read"]/n*1e3, st["fft"]/n*1e3, st["demod"]/n*1e3,
+                        st["write"]/n*1e3, (st["read"]+st["fft"]+st["demod"]+st["write"])/n*1e3,
+                        st["iter_max"]*1e3)
+                    st.update(read=0.0, fft=0.0, demod=0.0, write=0.0,
+                              iter_max=0.0, n=0, t0=t4)
 
             except asyncio.CancelledError:
                 raise
@@ -991,8 +1048,9 @@ async def _switch_sdr_mode(mode: str):
             _mode_trunk = TrunkMonitor(
                 app_dir=TRUNK_APP_DIR,
                 service=TRUNK_SERVICE,
-                site=TRUNK_SITE,
-                control_freq=TRUNK_CONTROL,
+                systems=TRUNK_SYSTEMS,
+                active=active_trunk_system,
+                playlist_path=TRUNK_PLAYLIST,
                 vnc_url=TRUNK_VNC_URL,
                 status_callback=on_trunk_status,
                 event_callback=on_trunk_event,
@@ -1149,6 +1207,20 @@ async def _lookup_dmr_id(dmr_id: int) -> dict:
 async def api_lookup(dmr_id: int):
     """Look up a DMR ID on RadioID.net; includes lat/lon from Nominatim geocoding."""
     return await _lookup_dmr_id(dmr_id)
+
+
+@app.get("/api/hamclock")
+async def api_hamclock():
+    """Same-origin proxy for the local OpenHamClock solar/band data (its CORS
+    allowlist can't cover every LAN/tailscale origin this dashboard serves)."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get("http://127.0.0.1:3001/api/n0nbh")
+            data = r.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="OpenHamClock not reachable")
+    data["station"] = {"callsign": cfg("station.callsign", ""), "grid": cfg("qth.grid", "")}
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -1527,9 +1599,25 @@ async def api_trunk_status():
     cur = _cur_trunk()
     if cur:
         return cur.status_dict()
+    s = _trunk_sys(active_trunk_system)
+    control = s.get("control", [])
     return {"type": "status", "running": False, "tuner_locked": False,
-            "site": TRUNK_SITE, "control_freq": TRUNK_CONTROL,
+            "system": active_trunk_system, "systems": [x["name"] for x in TRUNK_SYSTEMS],
+            "site": s.get("site", ""), "protocol": s.get("protocol", ""),
+            "control_freq": int(control[0]) if control else 0, "color_code": s.get("color_code"),
             "encrypted_seen": False, "vnc_url": TRUNK_VNC_URL, "recent": []}
+
+
+@app.post("/api/trunk/system")
+async def api_set_trunk_system(name: str):
+    global active_trunk_system
+    if not any(s["name"] == name for s in TRUNK_SYSTEMS):
+        raise HTTPException(status_code=404, detail=f"unknown trunked system: {name}")
+    active_trunk_system = name
+    cur = _cur_trunk()
+    if cur:
+        await cur.set_system(name)   # stops SDRTrunk, rewrites playlist, restarts
+    return {"system": name}
 
 
 # ---------------------------------------------------------------------------

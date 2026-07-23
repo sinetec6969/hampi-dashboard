@@ -14,6 +14,7 @@ import AX25Page from './pages/AX25Page'
 import RadioPage from './pages/RadioPage'
 import MeteorPage from './pages/MeteorPage'
 import SatellitePage from './pages/SatellitePage'
+import HamClockPage from './pages/HamClockPage'
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches)
@@ -38,6 +39,7 @@ const NAV_LINKS = [
   { to: '/sstv',        label: 'SSTV' },
   { to: '/meteor',      label: 'METEOR' },
   { to: '/satellite',   label: 'Satellite' },
+  { to: '/hamclock',    label: 'HamClock' },
 ]
 
 const SCAN_KEY = 'hampi-scanlines'
@@ -84,6 +86,7 @@ export default function App() {
           <Route path="/sstv"       element={<SSTVPage />} />
           <Route path="/meteor"     element={<MeteorPage />} />
           <Route path="/satellite"  element={<SatellitePage />} />
+          <Route path="/hamclock"   element={<HamClockPage />} />
         </Routes>
       </div>
     </div>

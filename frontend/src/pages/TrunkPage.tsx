@@ -5,8 +5,12 @@ interface Call { _encrypted?: boolean; [k: string]: string | boolean | undefined
 interface Status {
   running: boolean
   tuner_locked: boolean
+  system: string
+  systems: string[]
   site: string
+  protocol: string
   control_freq: number
+  color_code: number | null
   encrypted_seen: boolean
   vnc_url: string
   recent: Call[]
@@ -51,6 +55,16 @@ export default function TrunkPage() {
     setSwitching(false)
   }
 
+  async function setSystem(name: string) {
+    setSwitching(true)
+    try {
+      await fetch(`/api/trunk/system?name=${encodeURIComponent(name)}`, { method: 'POST' })
+      const s = await fetch('/api/trunk/status').then(r => r.json())
+      setSt(s)
+    } catch { /* */ }
+    setSwitching(false)
+  }
+
   const active = mode === 'trunk'
   const recent = st?.recent ?? []
   let cols = COLS.slice(0, 5)
@@ -63,7 +77,7 @@ export default function TrunkPage() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10, padding: 12 }}>
       <div className="header">
         <span className="header-title">┌─ TRUNKED DMR</span>
-        <span className="header-freq">{((st?.control_freq ?? 454031250) / 1e6).toFixed(5)} MHz control</span>
+        <span className="header-freq">{((st?.control_freq ?? 454031250) / 1e6).toFixed(5)} MHz control · CC{st?.color_code ?? '?'}</span>
         <span className={'badge ' + (active && st?.tuner_locked ? 'badge-green' : active && st?.running ? 'badge-amber' : 'badge-red')}>
           {active && st?.tuner_locked ? '● Locked' : active && st?.running ? '◐ Starting' : '○ Idle'}
         </span>
@@ -76,7 +90,16 @@ export default function TrunkPage() {
         )}
       </div>
 
-      <div style={{ color: '#6aa886', fontSize: 12 }}>{st?.site ?? 'Carolina Connect Site 004'} · Connect Plus (SDRTrunk)</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6aa886', fontSize: 12 }}>
+        <label>System:</label>
+        <select value={st?.system ?? ''} disabled={switching || !st?.systems?.length}
+                onChange={e => setSystem(e.target.value)}
+                style={{ background: '#0c0c0c', color: '#a8e8c4', border: '1px solid #1d4030', padding: '2px 4px', font: 'inherit' }}>
+          {(st?.systems ?? []).map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <span>· {st?.site} · {st?.protocol === 'cap_plus' ? 'Capacity Plus' : 'Connect Plus'} (SDRTrunk)</span>
+        {active && <span style={{ color: '#4d7a62' }}>— switching reloads SDRTrunk (~20 s to relock)</span>}
+      </div>
 
       {!active && (
         <div className="mode-banner">
