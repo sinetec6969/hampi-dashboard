@@ -15,6 +15,7 @@ import RadioPage from './pages/RadioPage'
 import MeteorPage from './pages/MeteorPage'
 import SatellitePage from './pages/SatellitePage'
 import HamClockPage from './pages/HamClockPage'
+import AllScanPage from './pages/AllScanPage'
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches)
@@ -40,6 +41,7 @@ const NAV_LINKS = [
   { to: '/meteor',      label: 'METEOR' },
   { to: '/satellite',   label: 'Satellite' },
   { to: '/hamclock',    label: 'HamClock' },
+  { to: '/allscan',     label: 'AllScan' },
 ]
 
 const SCAN_KEY = 'hampi-scanlines'
@@ -87,6 +89,7 @@ export default function App() {
           <Route path="/meteor"     element={<MeteorPage />} />
           <Route path="/satellite"  element={<SatellitePage />} />
           <Route path="/hamclock"   element={<HamClockPage />} />
+          <Route path="/allscan"    element={<AllScanPage />} />
         </Routes>
       </div>
     </div>
