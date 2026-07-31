@@ -39,6 +39,7 @@ DEFAULT_CHANNELS = [
 
 AudioCb  = Callable[[bytes], Awaitable[None]]
 StatusCb = Callable[[dict], Awaitable[None]]
+FftCb    = Callable[[bytes], Awaitable[None]]
 
 
 def default_mode(freq: int) -> str:
@@ -118,6 +119,7 @@ class Scanner:
         rtl_port: int = 1235,
         audio_callback: Optional[AudioCb] = None,
         status_callback: Optional[StatusCb] = None,
+        fft_callback: Optional[FftCb] = None,
     ):
         self.channels   = self._normalize(channels)
         self.squelch_am = squelch_am
@@ -128,6 +130,7 @@ class Scanner:
 
         self._audio_cb  = audio_callback
         self._status_cb = status_callback
+        self._fft_cb    = fft_callback
         self._active    = False
         self._task: Optional[asyncio.Task] = None
 
@@ -267,6 +270,12 @@ class Scanner:
                 if not self.channels:
                     await asyncio.sleep(0.1)
                     continue
+
+                # Waterfall shows the 2.4 MHz around the channel we sit on, so it
+                # jumps with every retune — that is the scan, not a glitch.
+                if self._fft_cb:
+                    fft = await loop.run_in_executor(None, self._sdr.compute_fft, iq)
+                    await self._fft_cb(fft.tobytes())
 
                 ch = self.channels[self._active_idx]
                 demod = (self._sdr.nbfm_demodulate if ch["mode"] == "FM"

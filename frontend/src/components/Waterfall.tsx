@@ -6,6 +6,7 @@ interface Props {
   onClickTune?: (freq: number) => void
   palette?: 'classic' | 'green'
   onStats?: (sig: number, snr: number) => void
+  wsPath?: string   // default: device 0's main loop; the scanner has its own
 }
 
 const MIN_DB = -100, MAX_DB = -20, N_FFT = 1024, BW = 2.4e6
@@ -26,7 +27,8 @@ function dbToRgbGreen(db: number): [number, number, number] {
   const s = (t - 0.8) / 0.2; return [Math.round(220 * s), 255, Math.round(136 + 119 * s)]
 }
 
-export default function Waterfall({ centerFreqHz, onClickTune, palette = 'classic', onStats }: Props) {
+export default function Waterfall({ centerFreqHz, onClickTune, palette = 'classic', onStats,
+                                    wsPath = '/ws/waterfall' }: Props) {
   const displayRef   = useRef<HTMLCanvasElement>(null)
   const pingRef      = useRef<HTMLCanvasElement | null>(null)
   const pongRef      = useRef<HTMLCanvasElement | null>(null)
@@ -49,6 +51,8 @@ export default function Waterfall({ centerFreqHz, onClickTune, palette = 'classi
   const onStatsRef = useRef(onStats)
   onStatsRef.current = onStats
   const lastStatsRef = useRef(0)
+  const wsPathRef = useRef(wsPath)
+  wsPathRef.current = wsPath
 
   useEffect(() => {
     const display   = displayRef.current
@@ -70,7 +74,7 @@ export default function Waterfall({ centerFreqHz, onClickTune, palette = 'classi
     let alive = true
     let retry: ReturnType<typeof setTimeout> | undefined
     function connect() {
-      const ws = new WebSocket(wsUrl('/ws/waterfall'))
+      const ws = new WebSocket(wsUrl(wsPathRef.current))
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
       ws.onmessage = e => { rowBuf.current.push(new Float32Array(e.data)) }

@@ -221,6 +221,7 @@ waterfall_clients:  Set[WebSocket] = set()
 dmr_clients:        Set[WebSocket] = set()
 dmr_audio_clients:  Set[WebSocket] = set()
 scanner_clients:    Set[WebSocket] = set()
+scanner_wf_clients: Set[WebSocket] = set()
 meshtastic_clients: Set[WebSocket] = set()
 adsb_clients:       Set[WebSocket] = set()
 sstv_clients:       Set[WebSocket] = set()
@@ -317,6 +318,10 @@ async def broadcast_json(clients: Set[WebSocket], payload: dict) -> None:
 
 async def on_scanner_audio(pcm: bytes) -> None:
     await broadcast_bytes(scanner_clients, pcm)
+
+
+async def on_scanner_fft(fft: bytes) -> None:
+    await broadcast_bytes(scanner_wf_clients, fft)
 
 
 # TEMP instrumentation (Part 1A diagnosis) — remove after audio fix
@@ -647,6 +652,7 @@ async def lifespan(app: FastAPI):
                 rtl_port=SCAN_RTL_PORT,
                 audio_callback=on_scanner_audio,
                 status_callback=on_scanner_status,
+                fft_callback=on_scanner_fft,
             )
             await scanner.start()
             scanner_status["enabled"]  = True
@@ -824,6 +830,25 @@ async def ws_dmr_audio(websocket: WebSocket):
     finally:
         dmr_audio_clients.discard(websocket)
         logger.info("DMR audio client disconnected — total=%d", len(dmr_audio_clients))
+
+
+@app.websocket("/ws/scanner/waterfall")
+async def ws_scanner_waterfall(websocket: WebSocket):
+    """Float32 FFT frames from the scanner's own SDR — separate socket from
+    /ws/scanner, which already uses its binary channel for PCM."""
+    await websocket.accept()
+    scanner_wf_clients.add(websocket)
+    logger.info("Scanner waterfall client connected — total=%d", len(scanner_wf_clients))
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in scanner waterfall WebSocket handler")
+    finally:
+        scanner_wf_clients.discard(websocket)
+        logger.info("Scanner waterfall client disconnected — total=%d", len(scanner_wf_clients))
 
 
 @app.websocket("/ws/scanner")
@@ -1035,6 +1060,7 @@ async def _switch_sdr_mode(mode: str):
                 rtl_port=sdr.port,
                 audio_callback=on_scanner_audio,
                 status_callback=on_scanner_status,
+                fft_callback=on_scanner_fft,
             )
             await _mode_scanner.start()
             scanner_status["enabled"] = True

@@ -1,6 +1,7 @@
 import { wsUrl } from '../ws'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import AudioPlayer from '../components/AudioPlayer'
+import Waterfall from '../components/Waterfall'
 
 interface Channel {
   freq:  number
@@ -218,9 +219,20 @@ export default function ScannerPage() {
           )}
         </div>
 
-        {/* Right — controls + audio */}
+        {/* Right — waterfall + controls + audio */}
         <div className="scanner-controls">
-          <AudioPlayer wsPath="/ws/scanner" inputRate={48000} label="Scanner Audio" />
+          <div className="scanner-waterfall">
+            <Waterfall
+              centerFreqHz={channel?.freq ?? 0}
+              wsPath="/ws/scanner/waterfall"
+              palette="green"
+            />
+          </div>
+          <div className="scanner-wf-caption">
+            2.4 MHz around the channel in view — it jumps on every retune, that's the scan.
+          </div>
+
+          <AudioPlayer wsPath="/ws/scanner" inputRate={48000} label="Scanner Audio" auto />
 
           <div className="panel" style={{ marginTop: 8 }}>
             <div className="panel-title">Signal — {curMode} channel</div>

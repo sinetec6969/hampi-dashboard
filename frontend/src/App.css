@@ -184,6 +184,9 @@ input[type=range] { accent-color: #00ff88; }
 .scanner-setup-hint code { display: inline-block; background: #0d2418; padding: 2px 6px; color: #7fbf9a; font-size: 0.75rem; margin: 2px 0; }
 
 .scanner-now { font-size: 0.72rem; color: #7fbf9a; letter-spacing: 0.5px; white-space: nowrap; }
+
+.scanner-waterfall { height: 200px; flex-shrink: 0; border: 1px solid #1d4030; background: #000; overflow: hidden; }
+.scanner-wf-caption { font-size: 0.68rem; color: #3d6b52; margin-top: 4px; line-height: 1.5; }
 .scanner-ch-mode { font-size: 0.6rem; letter-spacing: 0.5px; padding: 1px 4px; border: 1px solid; flex-shrink: 0; }
 .scanner-ch-mode.am { color: #44ccff; border-color: #44ccff44; }
 .scanner-ch-mode.fm { color: #b8a04d; border-color: #b8a04d44; }

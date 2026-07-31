@@ -1,5 +1,5 @@
 import { wsUrl } from '../ws'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type Status = 'stopped' | 'connecting' | 'streaming'
 type Mode   = 'worklet' | 'scheduled'
@@ -8,9 +8,11 @@ interface Props {
   wsPath?:       string   // default: '/ws/audio'
   inputRate?:    number   // default: 8000  (Hz of incoming PCM)
   label?:        string   // default: 'Audio'
+  auto?:         boolean  // connect on mount, no start/stop buttons
 }
 
-export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, label = 'Audio' }: Props) {
+export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, label = 'Audio',
+                                      auto = false }: Props) {
   const [status, setStatus] = useState<Status>('stopped')
   const [mode,   setMode]   = useState<Mode>('worklet')
   const [err,    setErr]    = useState('')
@@ -156,6 +158,22 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
     setStatus('stopped')
   }
 
+  // Auto mode: connect on mount. A fresh AudioContext is suspended until a user
+  // gesture, so the next click anywhere on the page — locking a channel, usually
+  // — is what actually starts the sound.
+  useEffect(() => {
+    if (!auto) return
+    start()
+    const resume = () => { void ctxRef.current?.resume() }
+    document.addEventListener('click', resume)
+    document.addEventListener('keydown', resume)
+    return () => {
+      document.removeEventListener('click', resume)
+      document.removeEventListener('keydown', resume)
+      stop()
+    }
+  }, [auto])
+
   const dot: Record<Status, string> = {
     stopped: '#7fbf9a', connecting: '#ffaa00', streaming: '#00ff88',
   }
@@ -168,11 +186,13 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
           ● {status}
         </span>
       </div>
-      <div style={{ marginTop: 8 }}>
-        {status === 'stopped'
-          ? <button className="btn" onClick={start}>▶ Start</button>
-          : <button className="btn stop" onClick={stop}>■ Stop</button>}
-      </div>
+      {!auto && (
+        <div style={{ marginTop: 8 }}>
+          {status === 'stopped'
+            ? <button className="btn" onClick={start}>▶ Start</button>
+            : <button className="btn stop" onClick={stop}>■ Stop</button>}
+        </div>
+      )}
       {status === 'streaming' && (
         <div className="status-line" style={{ marginTop: 8 }}>
           {mode === 'worklet' ? 'AudioWorklet' : 'scheduled'}
