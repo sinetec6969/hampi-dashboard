@@ -173,7 +173,7 @@ const CARDS: CardDef[] = [
   { name: 'DMR VOICE', path: '/dmr',        sub: '438.800 MHz NFM · dsd-fme',    sdr: 'dmr' },
   { name: 'TRUNK',     path: '/trunk',      sub: 'Connect Plus · SDRTrunk',      sdr: 'trunk' },
   { name: 'ADS-B',     path: '/adsb',       sub: '1090 MHz · rtl_adsb',          sdr: 'adsb' },
-  { name: 'AIRBAND',   path: '/airband',    sub: '118–137 MHz AM',               sdr: 'airband' },
+  { name: 'SCANNER',   path: '/scanner',    sub: 'AM/FM · VHF/UHF favourites',   sdr: 'scanner' },
   { name: 'APRS',      path: '/aprs',       sub: '144.390 MHz · direwolf',       sdr: 'aprs' },
   { name: 'AX.25',     path: '/ax25',       sub: 'direwolf KISS :8001',          sdr: 'aprs', shared: true },
   { name: 'SSTV',      path: '/sstv',       sub: '145.800 MHz FM',               sdr: 'sstv' },

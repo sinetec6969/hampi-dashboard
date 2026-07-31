@@ -81,6 +81,14 @@ class SDREngine:
                                   window="hamming").astype(np.float32)
         self._am_lpf_zi = np.zeros(len(self._am_lpf) - 1, dtype=np.float32)
 
+        # NBFM (scanner) state — kept separate from the DMR/APRS FM path so a
+        # scanner retune cannot smear another mode's filter state mid-decode
+        self._nbfm_dec_zi = [np.zeros(len(self._lpf1) - 1, dtype=np.complex64),
+                             np.zeros(len(self._lpf2) - 1, dtype=np.complex64)]
+        self._nbfm_lpf_zi = np.zeros(len(self._audio_lpf) - 1, dtype=np.float32)
+        self._nbfm_prev: complex = 0 + 0j
+        self._nbfm_shift_phase = 0.0
+
     def _decimate(self, iq: np.ndarray, zi: list) -> np.ndarray:
         """Filtered 50:1 decimation to 48 kHz; zi carries state across chunks."""
         x, zi[0] = lfilter(self._lpf1, [1.0], iq, zi=zi[0])
@@ -304,6 +312,66 @@ class SDREngine:
         demod *= 32767.0 / np.pi
         pcm = np.clip(demod, -32768, 32767).astype(np.int16)
         return pcm.tobytes()
+
+    # ------------------------------------------------------------------
+    # Narrowband FM demodulation (scanner)
+    # ------------------------------------------------------------------
+
+    def nbfm_demodulate(self, iq: np.ndarray, target_freq: int) -> tuple[bytes, float]:
+        """
+        Demodulate analog narrowband FM, with AGC and a squelch metric.
+
+        Same discriminator as fm_demodulate, but two things differ because this
+        feeds a scanner rather than a decoder:
+          - Squelch metric is the *carrier* magnitude taken before the
+            discriminator. FM discriminator output is loudest on pure noise, so
+            audio level is an inverted and useless signal-presence test.
+          - AGC. Analog NBFM runs ±5 kHz deviation against DMR's ±3 kHz symbol
+            swing at a far higher rate; the raw discriminator output is much too
+            quiet to listen to unscaled.
+
+        Args:
+            iq:          Complex64 IQ array at self.sample_rate.
+            target_freq: Centre frequency of the FM carrier (Hz).
+
+        Returns:
+            (pcm_bytes, carrier_rms) — PCM is int16 little-endian mono 48 kHz.
+            carrier_rms is the channel-filtered baseband magnitude, in the same
+            0–1 scale as read_iq's output; use it for the squelch threshold.
+        """
+        n = len(iq)
+
+        freq_offset = target_freq - self.freq
+        if freq_offset != 0:
+            t = np.arange(n, dtype=np.float64) / self.sample_rate
+            shift = np.exp(-1j * (2 * np.pi * freq_offset * t + self._nbfm_shift_phase))
+            iq = (iq * shift).astype(np.complex64)
+            self._nbfm_shift_phase = (self._nbfm_shift_phase
+                                      + 2 * np.pi * freq_offset * n / self.sample_rate) % (2 * np.pi)
+        else:
+            self._nbfm_shift_phase = 0.0
+
+        decimated = self._decimate(iq, self._nbfm_dec_zi)
+
+        carrier_rms = float(np.sqrt(np.mean(np.abs(decimated) ** 2)))
+
+        prev = np.empty_like(decimated)
+        prev[0]  = self._nbfm_prev
+        prev[1:] = decimated[:-1]
+        self._nbfm_prev = decimated[-1]
+        demod = np.angle(decimated * np.conj(prev)).astype(np.float32)
+
+        demod, self._nbfm_lpf_zi = lfilter(
+            self._audio_lpf, [1.0], demod, zi=self._nbfm_lpf_zi
+        )
+
+        demod -= np.mean(demod)   # discriminator DC == residual tuning error
+        audio_rms = float(np.sqrt(np.mean(demod ** 2)))
+        if audio_rms > 1e-6:
+            demod = demod * (0.3 / audio_rms)
+
+        pcm = np.clip(demod * 32767.0, -32768, 32767).astype(np.int16)
+        return pcm.tobytes(), carrier_rms
 
     # ------------------------------------------------------------------
     # AM demodulation

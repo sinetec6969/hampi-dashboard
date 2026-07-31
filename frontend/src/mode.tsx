@@ -1,10 +1,10 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 
-export type SdrMode = 'dmr' | 'airband' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'trunk'
+export type SdrMode = 'dmr' | 'scanner' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'trunk'
 
 export const SDR_MODES: { mode: SdrMode; label: string }[] = [
   { mode: 'dmr',     label: 'DMR' },
-  { mode: 'airband', label: 'AIRBAND' },
+  { mode: 'scanner', label: 'SCANNER' },
   { mode: 'adsb',    label: 'ADS-B' },
   { mode: 'sstv',    label: 'SSTV' },
   { mode: 'aprs',    label: 'APRS' },
@@ -13,7 +13,7 @@ export const SDR_MODES: { mode: SdrMode; label: string }[] = [
 ]
 
 export const MODE_LABEL: Record<SdrMode, string> = {
-  dmr: 'DMR', airband: 'AIRBAND', adsb: 'ADS-B', sstv: 'SSTV',
+  dmr: 'DMR', scanner: 'SCANNER', adsb: 'ADS-B', sstv: 'SSTV',
   aprs: 'APRS', meteor: 'METEOR', trunk: 'TRUNK',
 }
 
@@ -32,8 +32,11 @@ const Ctx = createContext<ModeCtx | null>(null)
 
 export function ModeProvider({ children }: { children: React.ReactNode }) {
   const [actualMode, setActualMode] = useState<SdrMode | null>(null)
-  const [intendedMode, setIntended] = useState<SdrMode>(() =>
-    (localStorage.getItem(INTENT_KEY) as SdrMode) || 'dmr')
+  const [intendedMode, setIntended] = useState<SdrMode>(() => {
+    // A stale 'airband' from before the scanner rename would 400 on switch
+    const saved = localStorage.getItem(INTENT_KEY) as SdrMode
+    return SDR_MODES.some(m => m.mode === saved) ? saved : 'dmr'
+  })
   const [switching, setSwitching] = useState<SdrMode | null>(null)
   const [switchErr, setSwitchErr] = useState('')
   const switchingRef = useRef(false)

@@ -155,37 +155,59 @@ input[type=range] { accent-color: #00ff88; }
 .stt-time { color: #4d7a62; font-size: 0.65rem; white-space: nowrap; flex-shrink: 0; }
 .stt-text { color: #c8ffe0; line-height: 1.4; word-break: break-word; }
 
-/* ── Airband page ───────────────────────────────────────────── */
-.airband-page { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.airband-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #040805; border-bottom: 1px solid #1d4030; flex-shrink: 0; }
-.airband-title { font-size: 12px; color: #44ccff; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; }
-.airband-header-right { display: flex; align-items: center; gap: 12px; }
-.airband-squelch-dot { width: 10px; height: 10px; background: #1d4030; border: 1px solid #4d7a62; transition: background 0.2s, box-shadow 0.2s; }
-.airband-squelch-dot.open { background: #44ccff; box-shadow: 0 0 8px #44ccff; }
-.airband-disabled-badge { font-size: 0.72rem; color: #4d7a62; letter-spacing: 0.5px; }
+/* ── Scanner page ───────────────────────────────────────────── */
+.scanner-page { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.scanner-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #040805; border-bottom: 1px solid #1d4030; flex-shrink: 0; }
+.scanner-title { font-size: 12px; color: #44ccff; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; }
+.scanner-header-right { display: flex; align-items: center; gap: 12px; }
+.scanner-squelch-dot { width: 10px; height: 10px; background: #1d4030; border: 1px solid #4d7a62; transition: background 0.2s, box-shadow 0.2s; }
+.scanner-squelch-dot.open { background: #44ccff; box-shadow: 0 0 8px #44ccff; }
+.scanner-disabled-badge { font-size: 0.72rem; color: #4d7a62; letter-spacing: 0.5px; }
 
-.airband-body { flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
+.scanner-body { flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
 
-.airband-freqlist { width: 260px; flex-shrink: 0; border-right: 1px solid #0d2418; padding: 12px 8px; overflow-y: auto; }
-.airband-no-channels { font-size: 0.75rem; color: #3d6b52; margin-top: 8px; }
-.airband-ch-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border: 1px solid transparent; margin-bottom: 3px; transition: background 0.1s; }
-.airband-ch-row:hover { background: #07120c; }
-.airband-ch-row.active { background: #0d1f2a; border-color: #44ccff33; }
-.airband-ch-row.active.rx { background: #0d2a1f; border-color: #44ccff88; }
-.airband-ch-indicator { font-size: 0.6rem; width: 10px; color: #44ccff; flex-shrink: 0; }
-.airband-ch-row.rx .airband-ch-indicator { animation: blink 0.8s step-end infinite; }
-.airband-ch-label { font-size: 0.8rem; color: #a8e8c4; flex: 1; }
-.airband-ch-row.active .airband-ch-label { color: #44ccff; }
-.airband-ch-freq { font-size: 0.72rem; color: #4d7a62; letter-spacing: 0.5px; white-space: nowrap; }
-.airband-ch-row.active .airband-ch-freq { color: #44ccff99; }
+.scanner-freqlist { width: 260px; flex-shrink: 0; border-right: 1px solid #0d2418; padding: 12px 8px; overflow-y: auto; }
+.scanner-no-channels { font-size: 0.75rem; color: #3d6b52; margin-top: 8px; }
+.scanner-ch-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border: 1px solid transparent; margin-bottom: 3px; transition: background 0.1s; }
+.scanner-ch-row:hover { background: #07120c; }
+.scanner-ch-row.active { background: #0d1f2a; border-color: #44ccff33; }
+.scanner-ch-row.active.rx { background: #0d2a1f; border-color: #44ccff88; }
+.scanner-ch-indicator { font-size: 0.6rem; width: 10px; color: #44ccff; flex-shrink: 0; }
+.scanner-ch-row.rx .scanner-ch-indicator { animation: blink 0.8s step-end infinite; }
+.scanner-ch-label { font-size: 0.8rem; color: #a8e8c4; flex: 1; }
+.scanner-ch-row.active .scanner-ch-label { color: #44ccff; }
+.scanner-ch-freq { font-size: 0.72rem; color: #4d7a62; letter-spacing: 0.5px; white-space: nowrap; }
+.scanner-ch-row.active .scanner-ch-freq { color: #44ccff99; }
 
-.airband-controls { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 0; }
-.airband-setup-hint { background: #040805; border: 1px solid #0d2418; padding: 12px; margin-top: 8px; font-size: 0.78rem; color: #58a67a; line-height: 1.7; }
-.airband-setup-hint code { display: inline-block; background: #0d2418; padding: 2px 6px; color: #7fbf9a; font-size: 0.75rem; margin: 2px 0; }
+.scanner-controls { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 0; }
+.scanner-setup-hint { background: #040805; border: 1px solid #0d2418; padding: 12px; margin-top: 8px; font-size: 0.78rem; color: #58a67a; line-height: 1.7; }
+.scanner-setup-hint code { display: inline-block; background: #0d2418; padding: 2px 6px; color: #7fbf9a; font-size: 0.75rem; margin: 2px 0; }
+
+.scanner-now { font-size: 0.72rem; color: #7fbf9a; letter-spacing: 0.5px; white-space: nowrap; }
+.scanner-ch-mode { font-size: 0.6rem; letter-spacing: 0.5px; padding: 1px 4px; border: 1px solid; flex-shrink: 0; }
+.scanner-ch-mode.am { color: #44ccff; border-color: #44ccff44; }
+.scanner-ch-mode.fm { color: #b8a04d; border-color: #b8a04d44; }
+
+.scanner-slider-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.scanner-slider-row input[type="range"] { flex: 1; }
+.scanner-slider-val { font-size: 0.72rem; color: #7fbf9a; min-width: 48px; text-align: right; }
+
+.scanner-meter { position: relative; height: 10px; background: #071009; border: 1px solid #1d4030; margin-top: 6px; overflow: hidden; }
+.scanner-meter-fill { height: 100%; background: #2f8f5c; transition: width 0.1s linear; }
+.scanner-meter-thresh { position: absolute; top: -2px; bottom: -2px; width: 1px; background: #44ccff; }
+
+.scanner-ini-actions { display: flex; gap: 6px; margin-top: 8px; }
+.scanner-ini-actions .btn { font-size: 0.7rem; padding: 3px 10px; }
+.scanner-ini-text { width: 100%; height: 220px; margin-top: 8px; resize: vertical; background: #040805;
+  border: 1px solid #1d4030; color: #a8e8c4; font-family: inherit; font-size: 0.74rem; line-height: 1.5; padding: 8px; }
+.scanner-ini-text:focus { outline: none; border-color: #44ccff66; }
+.scanner-ini-msg { margin-top: 8px; font-size: 0.72rem; padding: 6px 8px; border: 1px solid; line-height: 1.5; }
+.scanner-ini-msg.ok  { color: #7fbf9a; border-color: #1d4030; background: #071009; }
+.scanner-ini-msg.err { color: #e08a6a; border-color: #5c2f22; background: #140806; }
 
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
-.sync-dot, .airband-squelch-dot, .mesh-conn-dot, .mesh-node-dot,
+.sync-dot, .scanner-squelch-dot, .mesh-conn-dot, .mesh-node-dot,
 .sstv-state-dot, .sstv-lightbox-close { border-radius: 50%; }
 
 /* ── Meshtastic page ────────────────────────────────────────────── */
@@ -403,11 +425,11 @@ input[type=range] { accent-color: #00ff88; }
   .bottom-row { flex-direction: column; height: auto; }
   .map-wrap { height: 240px; flex: none; }
 
-  /* Airband — stack freq list above controls */
-  .airband-page { height: auto; }
-  .airband-body { flex-direction: column; overflow: visible; min-height: 0; }
-  .airband-freqlist { width: 100%; max-height: 200px; border-right: none; border-bottom: 1px solid #0d2418; }
-  .airband-controls { overflow: visible; }
+  /* Scanner — stack freq list above controls */
+  .scanner-page { height: auto; }
+  .scanner-body { flex-direction: column; overflow: visible; min-height: 0; }
+  .scanner-freqlist { width: 100%; max-height: 200px; border-right: none; border-bottom: 1px solid #0d2418; }
+  .scanner-controls { overflow: visible; }
 
   /* Meshtastic — stack node list + map + messages */
   .mesh-page { height: auto; }

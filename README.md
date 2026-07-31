@@ -26,7 +26,7 @@ Digital voice decoded. Aircraft tracked. Mesh nodes mapped. Weather satellites i
 | 📡 DMR digital voice | ✅ Live | decode + **live audio** · talkgroup aliases · offline RadioID DB (307k users) · call history |
 | 🚔 Trunked DMR | ✅ Live | Connect Plus control-channel tracking via SDRTrunk · call log · encryption flags |
 | ✈️ ADS-B 1090 MHz | ✅ Live | aircraft map · CPR positions · local fleet DB (516k airframes) · track history |
-| 🛩️ Airband AM | ✅ Live | 118–137 MHz scanner · squelch · browser audio |
+| 📻 Scanner AM/FM | ✅ Live | AM + FM anywhere in VHF/UHF · editable `.ini` favourites · adjustable dwell + hold |
 | 📻 APRS | ⏳ Waiting on antenna | direwolf TNC · station map · packet log — chain runs, but a 70cm whip is deaf on 2m, so no off-air decode yet |
 | 📟 AX.25 | ⏳ Waiting on antenna | KISS terminal · raw frames · click-to-tune waterfall — same 2m problem |
 | 📺 SSTV | ⏳ Waiting on a bird | Scottie/Martin/Robot36 decoder + live canvas · satellite tracking with Doppler auto-tune — needs an ISS event or a local test signal |
@@ -51,7 +51,7 @@ let modes run simultaneously.
 |---|---|
 | **Pi** | Raspberry Pi 4 (4 GB) — what this runs on. Pi 5 has headroom to spare |
 | **SDR** | RTL-SDR Blog V4 (or any RTL2832U) |
-| **Dongles** | 1 → mode-switch everything · 2 → DMR + airband at once · 3 → add dedicated ADS-B |
+| **Dongles** | 1 → mode-switch everything · 2 → DMR + scanner at once · 3 → add dedicated ADS-B |
 | **Mesh** | any Meshtastic USB device — here: Heltec WiFi LoRa 32 V3 |
 | **Satellite RX** | LilyGO T3 LoRa32 running TinyGS firmware (optional) |
 | **TX (Phase A)** | Digirig Mobile + an HT (BF-F8HP Pro here) — optional, gated off by default |
@@ -136,18 +136,20 @@ lookup — it works, but that's your monitoring habits leaving the LAN.
 
 Everything lives in `config.yaml` at the repo root —
 [`config.yaml.example`](config.yaml.example) documents every key. The old env var
-names (`SDR_FREQ`, `AIRBAND_SQUELCH`, …) still work and **override** the yaml, so
+names (`SDR_FREQ`, `SCAN_SQUELCH_FM`, …) still work and **override** the yaml, so
 systemd drop-ins and one-off shell overrides behave as expected. Anything set
 nowhere falls back to a sane default.
 
 ```yaml
 sdr:      { freq: 438800000, gain: 49.6 }     # device 0 — mode switcher home base
 qth:      { grid: EM95of }                    # drives all satellite pass prediction
-airband:
+scanner:
   rtl_device: 1                               # index or EEPROM serial ("HAMPI1")
-  squelch: 0.01
-  frequencies:
-    - { freq: 121500000, label: "Guard" }
+  squelch_am: 0.01                            # AM and FM squelch on different metrics
+  squelch_fm: 0.05
+  dwell_ms: 2000                              # time on a quiet channel
+  hold_s: 1.0                                 # extra time held after a signal drops
+  favorites: ../scanner_favorites.ini         # channel list; wins over the seed below
 talkgroups:                                   # DMR aliases shown next to TG numbers
   91: "Worldwide"
   3116: "Texas"
@@ -164,7 +166,7 @@ radio:
 ### The mode switcher
 
 Device 0 has one owner at a time. The home-page toggle moves it between
-**DMR · Airband · ADS-B · SSTV · APRS · METEOR · Trunk** with no restart. APRS mode
+**DMR · Scanner · ADS-B · SSTV · APRS · METEOR · Trunk** with no restart. APRS mode
 also feeds the AX.25 terminal (one direwolf, two decoders). METEOR hands the dongle
 to SatDump; Trunk hands it to the SDRTrunk service. If a switch fails, the backend
 rolls back to DMR automatically — that path is tested, not aspirational.
@@ -185,8 +187,12 @@ full SDRTrunk UI is a VNC hop away if you need it.
 `adsb.lat_ref`/`lon_ref` to decode from single frames too). Registration, type,
 operator joined from the local fleet DB at first sighting.
 
-**Airband** — real AM demod (envelope detection, 3.5 kHz voice LPF, AGC), scanning
-Guard/CTAF/Center/Departure with squelch hang. Click a channel to lock it.
+**Scanner** — AM and FM anywhere the tuner reaches, one channel list, modulation
+picked per channel. AM is envelope detection with a 3.5 kHz voice LPF and AGC; FM
+is a discriminator with AGC that squelches on carrier magnitude taken *before* the
+discriminator, because FM audio is loudest on pure noise. Squelch is two values for
+that reason. Dwell and hold are adjustable live; click a channel to lock it.
+Favourites live in an editable `.ini` you can edit in the page, upload, or download.
 
 **APRS + AX.25** — direwolf fed demodulated FM straight over stdin, no soundcard
 loopback. aprslib parses positions/weather/messages onto a map; the raw AX.25
@@ -222,7 +228,7 @@ radio. [ROADMAP-NEXT.md](ROADMAP-NEXT.md) has the plan.
 Device 0 — one owner at a time (home-page switcher)
   ├─ [DMR]     rtl_tcp :1234 → SDREngine → FM demod → dsd-fme ─ stderr → /ws/dmr
   │                                                   └ UDP audio → /ws/dmr-audio
-  ├─ [Airband] rtl_tcp :1234 → SDREngine → AM demod → squelch gate → /ws/airband
+  ├─ [Scanner] rtl_tcp :1234 → SDREngine → AM/FM demod → squelch gate → /ws/scanner
   ├─ [ADS-B]   rtl_adsb -d 0 → pyModeS → /ws/adsb
   ├─ [SSTV]    rtl_tcp :1234 → SDREngine → FM demod → SSTVDecoder → /ws/sstv
   │                              └ sat tracker retunes for Doppler once/second
@@ -253,10 +259,11 @@ That's the rollback doing its job. Check `journalctl -u hampi-dashboard` for wha
 the target mode choked on — usually the dongle was still settling from the last
 owner; try again in a few seconds.
 
-**Airband: silence**
+**Scanner: silence**
 Silence is the squelch working. If you never hear anything, lower the squelch
-slider; if it's all static, raise it. With one dongle make sure device 0 is
-actually in Airband mode — it's the first thing to check for any "no data" symptom.
+slider for that channel's mode — AM and FM have separate ones; if it's all static,
+raise it. With one dongle make sure device 0 is actually in Scanner mode — it's the
+first thing to check for any "no data" symptom.
 
 **ADS-B: aircraft in the list but not on the map**
 Position needs two CPR frames (even+odd) per aircraft, or one frame plus
@@ -293,6 +300,18 @@ city/state to OpenStreetMap. `geocode: enable: true` if you're fine with that.
 Same device index. Give them EEPROM serials (see udev section).
 
 ## Version history
+
+### 0.9-b3t7 — 2026-07-31
+**Airband became Scanner.** The AM airband scanner is now a general AM/FM scanner
+across the tuner's whole VHF/UHF range, modulation picked per channel — an airband
+AM channel and a 2 m FM repeater can sit in the same list. New `nbfm_demodulate()`
+in [sdr.py](backend/sdr.py) (AGC + carrier-magnitude squelch metric taken before
+the discriminator; the DMR/APRS/SSTV FM path is untouched). Squelch is two values,
+AM and FM, because the metrics are not the same quantity. Dwell and hold are now
+adjustable live — the old dwell slider posted nothing. Favourites moved to an
+editable [scanner_favorites.ini](scanner_favorites.ini) you can edit in the page,
+upload, or download; it wins over `config.yaml`, which is now just the seed.
+`airband.py` → `scanner.py`, `/airband` → `/scanner`, `AIRBAND_*` → `SCAN_*`.
 
 ### 0.9-b3t6 — 2026-07-23 · Code Named HamPi
 The polish release. **OpenHamClock** folded in as a first-class page (`/hamclock`)

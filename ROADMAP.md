@@ -9,6 +9,12 @@ Local multi-mode RF monitoring dashboard running on a Raspberry Pi, served via a
 > **Current version:** 0.9-b3t4 (2026-06-12)  
 > **Status:** **Beta.** DMR (metadata + offline RadioID + TG aliases), ADS-B (+ local flight lookup), Airband AM, Meshtastic, SSTV, APRS, AX.25 (RX terminal), and Satellite telemetry (via TinyGS hardware → local MQTT) are all live. config.yaml + systemd + udev rules in place. Remaining work is feature backlog, not core. Mobile-responsive. Single RTL-SDR dongle covers all SDR modes via the mode switcher; second dongle runs Airband dedicated. DMR audio decode was removed — AMBE via dsd-fme had persistent sample-rate issues on Pi 4; DMR page is now metadata-only (talkgroup, caller, call history, map).
 
+> **Historical document — read names as of 0.9-b3t4.** This is the completed RX-era
+> roadmap, kept as a record rather than updated in place. Notably, "Airband" became
+> the general AM/FM **Scanner** in 0.9-b3t7 (`airband.py` → `scanner.py`,
+> `/airband` → `/scanner`, `AIRBAND_*` → `SCAN_*`); current behaviour is in
+> [README.md](README.md) and [STATE.md](STATE.md).
+
 ---
 
 ## ⚠️ Known Issues
@@ -110,18 +116,22 @@ Receive VHF airband voice (118–137 MHz) with AM demodulation and channel scann
 
 **Implemented (0.1-1_itbegins):**
 - `sdr.py` — `am_demodulate()`: IQ → freq shift → decimate 2.4 MHz→48 kHz → envelope detection → 3.5 kHz LPF → DC remove → AGC → int16 PCM at 48 kHz
-- `airband.py` — `AirbandScanner`: owns its own `rtl_tcp` instance; cycles channel list with configurable dwell; holds on squelch break + 1 s hang; gated audio output
-- `main.py` — `/ws/airband`; `GET /api/airband/status`, `POST /api/airband/squelch`, `POST /api/airband/scan`, `POST /api/airband/channel/{idx}`
+- `airband.py` — `AirbandScanner`: owns its own `rtl_tcp` instance; cycles channel list with configurable dwell; holds on squelch break + 1 s hang; gated audio output *(renamed `scanner.py` / `Scanner` in 0.9-b3t7, now AM+FM across VHF/UHF)*
+- `main.py` — `/ws/airband`; `GET /api/airband/status`, `POST /api/airband/squelch`, `POST /api/airband/scan`, `POST /api/airband/channel/{idx}` *(all `/airband` → `/scanner` in 0.9-b3t7)*
 - `AirbandPage.tsx` — frequency list, AudioWorklet player, squelch slider, scanner toggle
 
 **Configuration (env vars):**
 ```
-AIRBAND_ENABLE=1          # 1 = start scanner on boot (default: 1)
-AIRBAND_RTL_DEV=1         # RTL-SDR device index (default: 1)
-AIRBAND_RTL_PORT=1235     # rtl_tcp port (default: 1235)
-AIRBAND_GAIN=40.0         # tuner gain dB
-AIRBAND_SQUELCH=0.01      # squelch threshold — tune for your noise floor
-AIRBAND_DWELL_MS=2000     # ms per channel when scanning
+# Renamed in 0.9-b3t7 — AIRBAND_* became SCAN_*:
+SCAN_ENABLE=1             # 1 = start scanner on boot (default: 1)
+SCAN_RTL_DEV=1            # RTL-SDR device index (default: 1)
+SCAN_RTL_PORT=1235        # rtl_tcp port (default: 1235)
+SCAN_GAIN=40.0            # tuner gain dB
+SCAN_SQUELCH_AM=0.01      # AM squelch — envelope modulation depth
+SCAN_SQUELCH_FM=0.05      # FM squelch — carrier magnitude (different metric)
+SCAN_DWELL_MS=2000        # ms per channel when scanning
+SCAN_HOLD_S=1.0           # extra seconds held after a signal drops
+SCAN_FAVORITES=../scanner_favorites.ini   # editable channel list
 ```
 
 **Known limitations:**

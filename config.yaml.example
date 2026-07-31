@@ -18,18 +18,21 @@ sdr:                      # device 0 — mode switcher (DMR default)
   # sample_rate: 2400000
   # chunk_size: 131072
 
-airband:
+scanner:
   enable: true
   rtl_device: 1
   rtl_port: 1235
   gain: 40.0
-  squelch: 0.01           # tune for your noise floor
-  dwell_ms: 2000
-  frequencies:
-    - { freq: 121500000, label: "Guard" }
-    - { freq: 123450000, label: "CTAF" }
-    - { freq: 126200000, label: "Center" }
-    - { freq: 132850000, label: "Departure" }
+  squelch_am: 0.01        # envelope modulation depth — tune for your noise floor
+  squelch_fm: 0.05        # carrier magnitude — different metric, different scale
+  dwell_ms: 2000          # time on a quiet channel before moving on
+  hold_s: 1.0             # extra time held after a signal drops
+  favorites: ../scanner_favorites.ini   # editable channel list; wins over the seed below
+  frequencies:            # seed only, used until the favorites file exists
+    - { freq: 121500000, label: "Guard",     mode: AM }
+    - { freq: 123450000, label: "CTAF",      mode: AM }
+    - { freq: 126200000, label: "Center",    mode: AM }
+    - { freq: 132850000, label: "Departure", mode: AM }
 
 adsb:
   enable: false           # true = dedicated decoder on boot (needs own dongle)

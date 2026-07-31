@@ -8,7 +8,7 @@ import TrunkPage from './pages/TrunkPage'
 import ADSBPage from './pages/ADSBPage'
 import APRSPage from './pages/APRSPage'
 import MeshtasticPage from './pages/MeshtasticPage'
-import AirbandPage from './pages/AirbandPage'
+import ScannerPage from './pages/ScannerPage'
 import SSTVPage from './pages/SSTVPage'
 import AX25Page from './pages/AX25Page'
 import RadioPage from './pages/RadioPage'
@@ -36,7 +36,7 @@ const NAV_LINKS = [
   { to: '/ax25',        label: 'AX.25' },
   { to: '/radio',       label: 'Radio TX' },
   { to: '/meshtastic',  label: 'Meshtastic' },
-  { to: '/airband',     label: 'Airband' },
+  { to: '/scanner',     label: 'Scanner' },
   { to: '/sstv',        label: 'SSTV' },
   { to: '/meteor',      label: 'METEOR' },
   { to: '/satellite',   label: 'Satellite' },
@@ -84,7 +84,7 @@ export default function App() {
           <Route path="/ax25"       element={<AX25Page />} />
           <Route path="/radio"      element={<RadioPage />} />
           <Route path="/meshtastic" element={<MeshtasticPage />} />
-          <Route path="/airband"    element={<AirbandPage />} />
+          <Route path="/scanner"    element={<ScannerPage />} />
           <Route path="/sstv"       element={<SSTVPage />} />
           <Route path="/meteor"     element={<MeteorPage />} />
           <Route path="/satellite"  element={<SatellitePage />} />
