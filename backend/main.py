@@ -41,6 +41,7 @@ from radio import RadioInterface
 from satpredict import SatTracker
 from meteor import MeteorDecoder
 from subghz import SubGHzDecoder
+from ble import BLEScanner
 from sdrtrunk import TrunkMonitor
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
@@ -203,6 +204,10 @@ SAT_ENABLE:  bool = cfg_bool("SAT_ENABLE", "satellite.enable", 1)
 MQTT_HOST:   str  = os.getenv("MQTT_HOST",  cfg("satellite.mqtt_host", "localhost"))
 MQTT_PORT:   int  = int(os.getenv("MQTT_PORT", cfg("satellite.mqtt_port", 1883)))
 
+# BLE advertisement scan on the built-in radio — independent of device 0
+BLE_ENABLE: bool = cfg_bool("BLE_ENABLE", "ble.enable", 1)
+BLE_TTL_S:  int  = int(os.getenv("BLE_TTL_S", cfg("ble.ttl_s", 600)))
+
 # Station identity + radio TX (Phase A — Digirig). TX is hard-gated off by default.
 STATION:     dict = cfg("station", None) or {}
 TX_ENABLE:   bool = cfg_bool("TX_ENABLE", "radio.tx_enable", 0)
@@ -233,6 +238,7 @@ meshtastic_clients: Set[WebSocket] = set()
 adsb_clients:       Set[WebSocket] = set()
 sstv_clients:       Set[WebSocket] = set()
 satellite_clients:  Set[WebSocket] = set()
+ble_clients:        Set[WebSocket] = set()
 aprs_clients:       Set[WebSocket] = set()
 ax25_clients:       Set[WebSocket] = set()
 meteor_clients:     Set[WebSocket] = set()
@@ -246,6 +252,7 @@ _mode_meteor: Optional[MeteorDecoder] = None  # SatDump owns device 0 directly
 _mode_subghz: Optional[SubGHzDecoder] = None  # rtl_433 owns device 0 directly
 _mode_trunk:  Optional[TrunkMonitor]  = None  # SDRTrunk service owns device 0
 satellite_monitor: Optional[SatelliteMonitor] = None
+ble_scanner: Optional[BLEScanner] = None
 radio: Optional[RadioInterface] = None
 sat_tracker: Optional[SatTracker] = None
 
@@ -403,6 +410,10 @@ async def on_satellite_packet(packet: dict) -> None:
 
 async def on_satellite_status(status: dict) -> None:
     await broadcast_json(satellite_clients, status)
+
+
+async def on_ble_update(msg: dict) -> None:
+    await broadcast_json(ble_clients, msg)
 
 
 async def on_meteor_status(msg: dict) -> None:
@@ -622,7 +633,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, scanner, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker
+    global sdr, decoder, scanner, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker, ble_scanner
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -708,6 +719,15 @@ async def lifespan(app: FastAPI):
             logger.warning("SatelliteMonitor failed to start", exc_info=True)
             satellite_monitor = None
 
+    if BLE_ENABLE:
+        ble_scanner = BLEScanner(ttl_s=BLE_TTL_S, update_callback=on_ble_update)
+        try:
+            await ble_scanner.start()
+        except Exception as exc:
+            # Usually hci0 rfkill-blocked or powered off — surfaced on the BLE page
+            logger.warning("BLEScanner failed to start: %s", exc)
+            ble_scanner.error = str(exc)
+
     # Start Meshtastic handler
     if MESH_ENABLE:
         try:
@@ -779,6 +799,8 @@ async def lifespan(app: FastAPI):
         await meshtastic.stop()
     if satellite_monitor is not None:
         await satellite_monitor.stop()
+    if ble_scanner is not None:
+        await ble_scanner.stop()
     if radio is not None:
         radio.stop()
     logger.info("Shutdown complete")
@@ -2028,6 +2050,38 @@ async def ws_satellite(websocket: WebSocket):
         logger.exception("Unexpected error in satellite WebSocket handler")
     finally:
         satellite_clients.discard(websocket)
+
+
+@app.websocket("/ws/ble")
+async def ws_ble(websocket: WebSocket):
+    await websocket.accept()
+    ble_clients.add(websocket)
+    try:
+        if ble_scanner is not None:
+            await websocket.send_text(json.dumps({"type": "devices",
+                                                  "devices": ble_scanner.device_list(),
+                                                  "status": ble_scanner.status_dict()}))
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in BLE WebSocket handler")
+    finally:
+        ble_clients.discard(websocket)
+
+
+@app.get("/api/ble/status")
+async def api_ble_status():
+    if ble_scanner is None:
+        return {"type": "status", "running": False, "devices": 0, "trackers": 0,
+                "ttl_s": BLE_TTL_S, "error": "" if BLE_ENABLE else "disabled in config"}
+    return ble_scanner.status_dict()
+
+
+@app.get("/api/ble/devices")
+async def api_ble_devices():
+    return ble_scanner.device_list() if ble_scanner is not None else []
 
 
 @app.get("/api/satellite/status")

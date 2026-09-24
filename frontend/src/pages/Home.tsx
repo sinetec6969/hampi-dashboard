@@ -181,6 +181,7 @@ const CARDS: CardDef[] = [
   { name: 'SUB-GHZ',   path: '/subghz',     sub: '433.92 / 315 MHz · rtl_433',   sdr: 'subghz' },
   { name: 'MESHTASTIC', path: '/meshtastic', sub: 'LoRa mesh · USB serial',      independent: true },
   { name: 'SATELLITE', path: '/satellite',  sub: 'TinyGS · Mosquitto',           independent: true },
+  { name: 'BLE',       path: '/ble',        sub: '2.4 GHz · built-in radio',     independent: true },
 ]
 
 const GREEN = '#00ff88', AMBER = '#ffb000'
@@ -522,7 +523,7 @@ export default function Home() {
                   badge = 'LIVE'
                   stat = c.name === 'MESHTASTIC'
                     ? (mesh.nodeCount != null ? `${mesh.nodeCount} nodes · live` : 'connecting…')
-                    : 'TinyGS · MQTT online'
+                    : c.name === 'BLE' ? 'scanning · no dongle' : 'TinyGS · MQTT online'
                 } else if (c.sdr && actualMode === c.sdr) {
                   led = GREEN
                   badge = c.shared ? 'LIVE' : '▶ DEV0'

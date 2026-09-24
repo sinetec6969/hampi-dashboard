@@ -11,3 +11,5 @@ pyyaml
 aprslib
 skyfield
 pyserial
+bleak
+bluetooth-numbers

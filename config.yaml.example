@@ -58,6 +58,10 @@ subghz:                   # sub-GHz ISM devices via rtl_433 (source build agains
   hop_s: 60
   # gain: 40.0            # omit for rtl_433 auto gain
 
+ble:                      # BLE advert scan on the Pi's built-in radio — runs beside any SDR mode
+  enable: true            # needs hci0 unblocked: rfkill unblock bluetooth
+  ttl_s: 600              # drop devices unheard this long
+
 qth:
   grid: EM95of            # Maidenhead locator — drives satellite pass prediction
 
