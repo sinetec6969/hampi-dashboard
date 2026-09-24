@@ -53,6 +53,11 @@ meteor:                   # METEOR-M LRPT weather imagery (needs: apt install sa
   pipeline: meteor_m2_lrpt
   # image_dir: ../meteor_images
 
+subghz:                   # sub-GHz ISM devices via rtl_433 (source build against rtl-sdr-blog)
+  freqs: [433920000, 315000000]   # >1 = rtl_433 hops; 315 MHz is US TPMS
+  hop_s: 60
+  # gain: 40.0            # omit for rtl_433 auto gain
+
 qth:
   grid: EM95of            # Maidenhead locator — drives satellite pass prediction
 

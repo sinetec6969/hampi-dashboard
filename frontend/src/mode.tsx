@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 
-export type SdrMode = 'dmr' | 'scanner' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'trunk'
+export type SdrMode = 'dmr' | 'scanner' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'subghz' | 'trunk'
 
 export const SDR_MODES: { mode: SdrMode; label: string }[] = [
   { mode: 'dmr',     label: 'DMR' },
@@ -9,15 +9,18 @@ export const SDR_MODES: { mode: SdrMode; label: string }[] = [
   { mode: 'sstv',    label: 'SSTV' },
   { mode: 'aprs',    label: 'APRS' },
   { mode: 'meteor',  label: 'METEOR' },
+  { mode: 'subghz',  label: 'SUB-GHZ' },
   { mode: 'trunk',   label: 'TRUNK' },
 ]
 
 export const MODE_LABEL: Record<SdrMode, string> = {
   dmr: 'DMR', scanner: 'SCANNER', adsb: 'ADS-B', sstv: 'SSTV',
-  aprs: 'APRS', meteor: 'METEOR', trunk: 'TRUNK',
+  aprs: 'APRS', meteor: 'METEOR', subghz: 'SUB-GHZ', trunk: 'TRUNK',
 }
 
 const INTENT_KEY = 'hampi-intended-mode'
+
+export interface ModeCap { ok: boolean; missing: string[]; hint: string }
 
 interface ModeCtx {
   actualMode: SdrMode | null
@@ -26,6 +29,7 @@ interface ModeCtx {
   switching: SdrMode | null
   switchErr: string
   switchMode: (m: SdrMode) => void
+  caps: Partial<Record<SdrMode, ModeCap>>
 }
 
 const Ctx = createContext<ModeCtx | null>(null)
@@ -40,6 +44,11 @@ export function ModeProvider({ children }: { children: React.ReactNode }) {
   const [switching, setSwitching] = useState<SdrMode | null>(null)
   const [switchErr, setSwitchErr] = useState('')
   const switchingRef = useRef(false)
+  const [caps, setCaps] = useState<Partial<Record<SdrMode, ModeCap>>>({})
+
+  useEffect(() => {
+    fetch('/api/capabilities').then(r => r.json()).then(d => setCaps(d.modes ?? {})).catch(() => {})
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -79,7 +88,7 @@ export function ModeProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <Ctx.Provider value={{ actualMode, intendedMode, setIntendedMode, switching, switchErr, switchMode }}>
+    <Ctx.Provider value={{ actualMode, intendedMode, setIntendedMode, switching, switchErr, switchMode, caps }}>
       {children}
     </Ctx.Provider>
   )

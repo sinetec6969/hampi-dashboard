@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -39,6 +40,7 @@ from ax25 import AX25Decoder
 from radio import RadioInterface
 from satpredict import SatTracker
 from meteor import MeteorDecoder
+from subghz import SubGHzDecoder
 from sdrtrunk import TrunkMonitor
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
@@ -154,6 +156,11 @@ METEOR_PIPELINE: str   = os.getenv("METEOR_PIPELINE", cfg("meteor.pipeline", "me
 METEOR_IMAGE_DIR: str  = os.getenv("METEOR_IMAGE_DIR", cfg("meteor.image_dir",
     os.path.join(os.path.dirname(__file__), "..", "meteor_images")))
 
+# Sub-GHz ISM (rtl_433) — >1 freq makes rtl_433 hop; US TPMS lives on 315 MHz
+SUBGHZ_FREQS: list[int] = [int(f) for f in cfg("subghz.freqs", [433920000, 315000000])]
+SUBGHZ_HOP_S: int       = int(os.getenv("SUBGHZ_HOP_S", cfg("subghz.hop_s", 60)))
+SUBGHZ_GAIN: Optional[float] = cfg("subghz.gain", None)   # None = rtl_433 auto gain
+
 # SDRTrunk trunked-DMR (Connect Plus) monitor — runs as the `sdrtrunk` systemd
 # user service; this mode just starts/stops it so the dashboard owns the dongle.
 TRUNK_APP_DIR:  str = os.getenv("TRUNK_APP_DIR", cfg("trunk.app_dir",
@@ -229,12 +236,14 @@ satellite_clients:  Set[WebSocket] = set()
 aprs_clients:       Set[WebSocket] = set()
 ax25_clients:       Set[WebSocket] = set()
 meteor_clients:     Set[WebSocket] = set()
+subghz_clients:     Set[WebSocket] = set()
 trunk_clients:      Set[WebSocket] = set()
 
 _mode_sstv: Optional[SSTVDecoder] = None
 _mode_aprs: Optional[APRSDecoder] = None
 _mode_ax25: Optional[AX25Decoder] = None  # rides along with aprs mode (shared direwolf)
 _mode_meteor: Optional[MeteorDecoder] = None  # SatDump owns device 0 directly
+_mode_subghz: Optional[SubGHzDecoder] = None  # rtl_433 owns device 0 directly
 _mode_trunk:  Optional[TrunkMonitor]  = None  # SDRTrunk service owns device 0
 satellite_monitor: Optional[SatelliteMonitor] = None
 radio: Optional[RadioInterface] = None
@@ -402,6 +411,10 @@ async def on_meteor_status(msg: dict) -> None:
 
 async def on_meteor_image(msg: dict) -> None:
     await broadcast_json(meteor_clients, msg)
+
+
+async def on_subghz_msg(msg: dict) -> None:
+    await broadcast_json(subghz_clients, msg)
 
 
 async def on_trunk_status(msg: dict) -> None:
@@ -756,6 +769,8 @@ async def lifespan(app: FastAPI):
         await _mode_ax25.stop()
     if _mode_meteor is not None:
         await _mode_meteor.stop()
+    if _mode_subghz is not None:
+        await _mode_subghz.stop()
     if scanner is not None:
         await scanner.stop()
     if adsb_decoder is not None:
@@ -906,6 +921,40 @@ async def api_sysinfo():
     return info
 
 
+# Binaries each device-0 mode shells out to, and how to get them on this Pi
+MODE_TOOLS: dict[str, list[str]] = {
+    "dmr":     ["rtl_tcp", "dsd-fme"],
+    "scanner": ["rtl_tcp"],
+    "adsb":    ["rtl_adsb"],
+    "sstv":    ["rtl_tcp"],
+    "aprs":    ["rtl_tcp", "direwolf"],
+    "meteor":  ["rtl_tcp", "satdump"],
+    "subghz":  ["rtl_433"],
+}
+TOOL_HINTS: dict[str, str] = {
+    "rtl_tcp":  "source build: rtl-sdr-blog",
+    "rtl_adsb": "source build: rtl-sdr-blog",
+    "dsd-fme":  "source build: dsd-fme + mbelib (ambe_tones)",
+    "direwolf": "sudo apt install direwolf",
+    "satdump":  "sudo apt install satdump",
+    "rtl_433":  "source build: rtl_433 against rtl-sdr-blog",
+}
+
+
+@app.get("/api/capabilities")
+async def api_capabilities():
+    modes = {}
+    for mode, tools in MODE_TOOLS.items():
+        missing = [t for t in tools if shutil.which(t) is None]
+        modes[mode] = {"ok": not missing, "missing": missing,
+                       "hint": " · ".join(TOOL_HINTS[t] for t in missing)}
+    unit = os.path.expanduser(f"~/.config/systemd/user/{TRUNK_SERVICE}.service")
+    trunk_ok = os.path.isfile(unit)
+    modes["trunk"] = {"ok": trunk_ok, "missing": [] if trunk_ok else [f"{TRUNK_SERVICE}.service"],
+                      "hint": "" if trunk_ok else "install SDRTrunk + user service — see SDRTRUNK.md"}
+    return {"modes": modes}
+
+
 @app.get("/api/status")
 async def api_status():
     return {
@@ -956,6 +1005,10 @@ def _cur_meteor() -> Optional[MeteorDecoder]:
     return _mode_meteor if active_sdr_mode == "meteor" else None
 
 
+def _cur_subghz() -> Optional[SubGHzDecoder]:
+    return _mode_subghz if active_sdr_mode == "subghz" else None
+
+
 def _cur_trunk() -> Optional[TrunkMonitor]:
     return _mode_trunk if active_sdr_mode == "trunk" else None
 
@@ -971,7 +1024,7 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    VALID = ("dmr", "scanner", "adsb", "sstv", "aprs", "meteor", "trunk")
+    VALID = ("dmr", "scanner", "adsb", "sstv", "aprs", "meteor", "subghz", "trunk")
     if mode not in VALID:
         raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
     async with _mode_lock:
@@ -979,7 +1032,7 @@ async def api_set_sdr_mode(mode: str):
 
 
 async def _switch_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_scanner, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor, _mode_trunk
+    global active_sdr_mode, sdr_task, _mode_scanner, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor, _mode_subghz, _mode_trunk
 
     if mode == active_sdr_mode:
         return {"mode": active_sdr_mode}
@@ -1010,6 +1063,10 @@ async def _switch_sdr_mode(mode: str):
         if _mode_meteor is not None:
             await _mode_meteor.stop()
             _mode_meteor = None
+    elif active_sdr_mode == "subghz":
+        if _mode_subghz is not None:
+            await _mode_subghz.stop()
+            _mode_subghz = None
 
     elif active_sdr_mode == "trunk":
         if _mode_trunk is not None:
@@ -1089,6 +1146,18 @@ async def _switch_sdr_mode(mode: str):
             )
             await _mode_meteor.start()
 
+        elif mode == "subghz":
+            # rtl_433 owns device 0 directly (rtl_tcp stopped above).
+            _mode_subghz = SubGHzDecoder(
+                freqs=SUBGHZ_FREQS,
+                hop_s=SUBGHZ_HOP_S,
+                gain=SUBGHZ_GAIN,
+                rtl_device=sdr.device_index if isinstance(sdr.device_index, int) else 0,
+                event_callback=on_subghz_msg,
+                status_callback=on_subghz_msg,
+            )
+            await _mode_subghz.start()
+
         elif mode == "trunk":
             # SDRTrunk service claims device 0 over libusb (rtl_tcp stopped above).
             _mode_trunk = TrunkMonitor(
@@ -1134,7 +1203,7 @@ async def _switch_sdr_mode(mode: str):
         # Stop anything partially started — a leaked subprocess keeps device 0
         # busy and the DMR fallback below would fail too.
         for obj in (_mode_scanner, _mode_adsb, _mode_sstv, _mode_aprs,
-                    _mode_ax25, _mode_meteor, _mode_trunk):
+                    _mode_ax25, _mode_meteor, _mode_subghz, _mode_trunk):
             if obj is not None:
                 try:
                     await obj.stop()
@@ -1146,6 +1215,7 @@ async def _switch_sdr_mode(mode: str):
         _mode_aprs    = None
         _mode_ax25    = None
         _mode_meteor  = None
+        _mode_subghz  = None
         _mode_trunk   = None
         try:
             await loop.run_in_executor(None, sdr.stop)  # in case the failed mode left it running
@@ -1681,6 +1751,45 @@ async def ws_meteor(websocket: WebSocket):
     finally:
         meteor_clients.discard(websocket)
         logger.info("METEOR client disconnected — total=%d", len(meteor_clients))
+
+
+@app.websocket("/ws/subghz")
+async def ws_subghz(websocket: WebSocket):
+    await websocket.accept()
+    subghz_clients.add(websocket)
+    logger.info("SubGHz client connected — total=%d", len(subghz_clients))
+    try:
+        cur = _cur_subghz()
+        if cur:
+            await websocket.send_text(json.dumps(cur.status_dict()))
+    except Exception:
+        pass
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in SubGHz WebSocket handler")
+    finally:
+        subghz_clients.discard(websocket)
+        logger.info("SubGHz client disconnected — total=%d", len(subghz_clients))
+
+
+@app.get("/api/subghz/status")
+async def api_subghz_status():
+    cur = _cur_subghz()
+    if cur:
+        return cur.status_dict()
+    return {"type": "status", "running": False, "freqs": SUBGHZ_FREQS, "cur_freq": None,
+            "hop_s": SUBGHZ_HOP_S if len(SUBGHZ_FREQS) > 1 else None,
+            "devices": 0, "events": 0, "last_log": ""}
+
+
+@app.get("/api/subghz/devices")
+async def api_subghz_devices():
+    cur = _cur_subghz()
+    return cur.device_list() if cur else []
 
 
 @app.get("/api/meteor/status")

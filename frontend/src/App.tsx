@@ -13,6 +13,7 @@ import SSTVPage from './pages/SSTVPage'
 import AX25Page from './pages/AX25Page'
 import RadioPage from './pages/RadioPage'
 import MeteorPage from './pages/MeteorPage'
+import SubGHzPage from './pages/SubGHzPage'
 import SatellitePage from './pages/SatellitePage'
 import HamClockPage from './pages/HamClockPage'
 import AllScanPage from './pages/AllScanPage'
@@ -39,6 +40,7 @@ const NAV_LINKS = [
   { to: '/scanner',     label: 'Scanner' },
   { to: '/sstv',        label: 'SSTV' },
   { to: '/meteor',      label: 'METEOR' },
+  { to: '/subghz',      label: 'Sub-GHz' },
   { to: '/satellite',   label: 'Satellite' },
   { to: '/hamclock',    label: 'HamClock' },
   { to: '/allscan',     label: 'AllScan' },
@@ -87,6 +89,7 @@ export default function App() {
           <Route path="/scanner"    element={<ScannerPage />} />
           <Route path="/sstv"       element={<SSTVPage />} />
           <Route path="/meteor"     element={<MeteorPage />} />
+          <Route path="/subghz"     element={<SubGHzPage />} />
           <Route path="/satellite"  element={<SatellitePage />} />
           <Route path="/hamclock"   element={<HamClockPage />} />
           <Route path="/allscan"    element={<AllScanPage />} />

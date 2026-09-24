@@ -178,6 +178,7 @@ const CARDS: CardDef[] = [
   { name: 'AX.25',     path: '/ax25',       sub: 'direwolf KISS :8001',          sdr: 'aprs', shared: true },
   { name: 'SSTV',      path: '/sstv',       sub: '145.800 MHz FM',               sdr: 'sstv' },
   { name: 'METEOR',    path: '/meteor',     sub: '137.9 MHz QPSK · SatDump',     sdr: 'meteor' },
+  { name: 'SUB-GHZ',   path: '/subghz',     sub: '433.92 / 315 MHz · rtl_433',   sdr: 'subghz' },
   { name: 'MESHTASTIC', path: '/meshtastic', sub: 'LoRa mesh · USB serial',      independent: true },
   { name: 'SATELLITE', path: '/satellite',  sub: 'TinyGS · Mosquitto',           independent: true },
 ]
@@ -197,7 +198,7 @@ function PanelHead({ title, meta }: { title: string; meta?: React.ReactNode }) {
 
 export default function Home() {
   const navigate = useNavigate()
-  const { actualMode, intendedMode, setIntendedMode, switching, switchErr, switchMode } = useMode()
+  const { actualMode, intendedMode, setIntendedMode, switching, switchErr, switchMode, caps } = useMode()
   const dmr = useDmrFeed()
   const mesh = useMeshFeed()
   const hc = useHamClock()
@@ -386,14 +387,18 @@ export default function Home() {
               {SDR_MODES.map(({ mode, label }) => {
                 const on = actualMode === mode
                 const pending = switching === mode
+                const cap = caps[mode]
+                const absent = cap?.ok === false
                 return (
-                  <button key={mode} onClick={() => switchMode(mode)} disabled={switching !== null}
+                  <button key={mode} onClick={() => switchMode(mode)} disabled={switching !== null || absent}
+                    title={absent ? `missing ${cap.missing.join(', ')} — ${cap.hint}` : undefined}
                     style={{
                       fontFamily: 'inherit', fontSize: 11, letterSpacing: 1, padding: '4px 14px',
-                      cursor: switching ? 'default' : 'pointer',
+                      cursor: switching || absent ? 'default' : 'pointer',
                       border: `1px solid ${on ? '#00ff88' : '#1d4030'}`,
                       background: on ? '#00ff88' : 'transparent',
-                      color: on ? '#04170c' : '#58a67a',
+                      color: on ? '#04170c' : absent ? '#2c4d3a' : '#58a67a',
+                      textDecoration: absent ? 'line-through' : undefined,
                       opacity: pending ? 0.6 : 1,
                     }}>{pending ? `${label}…` : label}</button>
                 )
@@ -507,7 +512,12 @@ export default function Home() {
             <div className="rx-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
               {CARDS.map(c => {
                 let led = AMBER, badge = 'IDLE', stat = '— dev0 not in mode'
-                if (c.independent) {
+                const cap = c.sdr ? caps[c.sdr] : undefined
+                if (cap?.ok === false) {
+                  led = '#2c4d3a'
+                  badge = 'NOT INSTALLED'
+                  stat = cap.hint
+                } else if (c.independent) {
                   led = GREEN
                   badge = 'LIVE'
                   stat = c.name === 'MESHTASTIC'
