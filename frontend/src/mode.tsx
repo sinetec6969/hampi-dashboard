@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 
-export type SdrMode = 'dmr' | 'scanner' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'subghz' | 'pager' | 'trunk'
+export type SdrMode = 'dmr' | 'scanner' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 'subghz' | 'pager' | 'websdr' | 'trunk'
 
 export const SDR_MODES: { mode: SdrMode; label: string }[] = [
   { mode: 'dmr',     label: 'DMR' },
@@ -11,12 +11,13 @@ export const SDR_MODES: { mode: SdrMode; label: string }[] = [
   { mode: 'meteor',  label: 'METEOR' },
   { mode: 'subghz',  label: 'SUB-GHZ' },
   { mode: 'pager',   label: 'PAGER' },
+  { mode: 'websdr',  label: 'WEBSDR' },
   { mode: 'trunk',   label: 'TRUNK' },
 ]
 
 export const MODE_LABEL: Record<SdrMode, string> = {
   dmr: 'DMR', scanner: 'SCANNER', adsb: 'ADS-B', sstv: 'SSTV',
-  aprs: 'APRS', meteor: 'METEOR', subghz: 'SUB-GHZ', pager: 'PAGER', trunk: 'TRUNK',
+  aprs: 'APRS', meteor: 'METEOR', subghz: 'SUB-GHZ', pager: 'PAGER', websdr: 'WEBSDR', trunk: 'TRUNK',
 }
 
 const INTENT_KEY = 'hampi-intended-mode'

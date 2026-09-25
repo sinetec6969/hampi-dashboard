@@ -42,6 +42,7 @@ from satpredict import SatTracker
 from meteor import MeteorDecoder
 from subghz import SubGHzDecoder
 from pager import PagerDecoder
+from websdr import WebSDRReceiver, MODES as WEBSDR_MODES, DEFAULT_BW as WEBSDR_DEFAULT_BW
 from ble import BLEScanner
 from sdrtrunk import TrunkMonitor
 from dmr import DMRDecoder
@@ -168,6 +169,12 @@ SUBGHZ_GAIN: Optional[float] = cfg("subghz.gain", None)   # None = rtl_433 auto 
 PAGER_FREQ: int   = int(os.getenv("PAGER_FREQ", cfg("pager.freq", 152007500)))
 PAGER_GAIN: float = float(os.getenv("PAGER_GAIN", cfg("pager.gain", 40.0)))
 
+# WebSDR-style receiver page — starting centre; everything else is live-controlled
+WEBSDR_FREQ: int   = int(os.getenv("WEBSDR_FREQ", cfg("websdr.freq", 162400000)))
+WEBSDR_GAIN: float = float(os.getenv("WEBSDR_GAIN", cfg("websdr.gain", 40.0)))
+WEBSDR_TAGS: str   = os.getenv("WEBSDR_TAGS", cfg("websdr.tags_file",
+                               os.path.join(os.path.dirname(__file__), "..", "websdr_tags.json")))
+
 # SDRTrunk trunked-DMR (Connect Plus) monitor — runs as the `sdrtrunk` systemd
 # user service; this mode just starts/stops it so the dashboard owns the dongle.
 TRUNK_APP_DIR:  str = os.getenv("TRUNK_APP_DIR", cfg("trunk.app_dir",
@@ -250,6 +257,8 @@ ax25_clients:       Set[WebSocket] = set()
 meteor_clients:     Set[WebSocket] = set()
 subghz_clients:     Set[WebSocket] = set()
 pager_clients:      Set[WebSocket] = set()
+websdr_clients:     Set[WebSocket] = set()   # spectrum frames
+websdr_audio_clients: Set[WebSocket] = set()
 trunk_clients:      Set[WebSocket] = set()
 
 _mode_sstv: Optional[SSTVDecoder] = None
@@ -258,6 +267,7 @@ _mode_ax25: Optional[AX25Decoder] = None  # rides along with aprs mode (shared d
 _mode_meteor: Optional[MeteorDecoder] = None  # SatDump owns device 0 directly
 _mode_subghz: Optional[SubGHzDecoder] = None  # rtl_433 owns device 0 directly
 _mode_pager:  Optional[PagerDecoder]  = None  # rtl_fm owns device 0 directly
+_mode_websdr: Optional[WebSDRReceiver] = None  # rides the shared SDREngine like sstv
 _mode_trunk:  Optional[TrunkMonitor]  = None  # SDRTrunk service owns device 0
 satellite_monitor: Optional[SatelliteMonitor] = None
 ble_scanner: Optional[BLEScanner] = None
@@ -523,6 +533,33 @@ async def sstv_loop() -> None:
                     logger.exception("SSTV SDR reconnect failed")
     except asyncio.CancelledError:
         logger.info("SSTV loop cancelled")
+
+
+async def websdr_loop() -> None:
+    loop = asyncio.get_running_loop()
+    logger.info("WebSDR loop started — centre %d Hz", sdr.freq)
+    try:
+        while True:
+            try:
+                iq = await loop.run_in_executor(None, sdr.read_iq, CHUNK_SIZE)
+                rx = _mode_websdr
+                if rx is None:
+                    continue
+                frame, pcm = await loop.run_in_executor(None, rx.process, iq)
+                await broadcast_bytes(websdr_clients, frame)
+                await broadcast_bytes(websdr_audio_clients, pcm)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("WebSDR loop error — retrying in 3 s")
+                await asyncio.sleep(3)
+                try:
+                    sdr.stop()
+                    await loop.run_in_executor(None, sdr.start)
+                except Exception:
+                    logger.exception("WebSDR SDR reconnect failed")
+    except asyncio.CancelledError:
+        logger.info("WebSDR loop cancelled")
 
 
 # ---------------------------------------------------------------------------
@@ -971,6 +1008,7 @@ MODE_TOOLS: dict[str, list[str]] = {
     "meteor":  ["rtl_tcp", "satdump"],
     "subghz":  ["rtl_433"],
     "pager":   ["rtl_fm", "multimon-ng"],
+    "websdr":  ["rtl_tcp"],
 }
 TOOL_HINTS: dict[str, str] = {
     "rtl_tcp":  "source build: rtl-sdr-blog",
@@ -1071,7 +1109,7 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    VALID = ("dmr", "scanner", "adsb", "sstv", "aprs", "meteor", "subghz", "pager", "trunk")
+    VALID = ("dmr", "scanner", "adsb", "sstv", "aprs", "meteor", "subghz", "pager", "websdr", "trunk")
     if mode not in VALID:
         raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
     async with _mode_lock:
@@ -1079,7 +1117,7 @@ async def api_set_sdr_mode(mode: str):
 
 
 async def _switch_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_scanner, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor, _mode_subghz, _mode_pager, _mode_trunk
+    global active_sdr_mode, sdr_task, _mode_scanner, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor, _mode_subghz, _mode_pager, _mode_websdr, _mode_trunk
 
     if mode == active_sdr_mode:
         return {"mode": active_sdr_mode}
@@ -1118,6 +1156,13 @@ async def _switch_sdr_mode(mode: str):
         if _mode_pager is not None:
             await _mode_pager.stop()
             _mode_pager = None
+    elif active_sdr_mode == "websdr":
+        if sdr_task is not None and not sdr_task.done():
+            sdr_task.cancel()
+            await asyncio.gather(sdr_task, return_exceptions=True)
+            sdr_task = None
+        _mode_websdr = None
+        await loop.run_in_executor(None, sdr.stop)
 
     elif active_sdr_mode == "trunk":
         if _mode_trunk is not None:
@@ -1234,6 +1279,13 @@ async def _switch_sdr_mode(mode: str):
             )
             await _mode_trunk.start()
 
+        elif mode == "websdr":
+            sdr.freq = WEBSDR_FREQ
+            sdr.gain = WEBSDR_GAIN
+            await loop.run_in_executor(None, sdr.start)
+            _mode_websdr = WebSDRReceiver(sdr.sample_rate)
+            sdr_task = asyncio.create_task(websdr_loop(), name="websdr-loop")
+
         elif mode == "sstv":
             # If a satellite is already tracked, centre on its downlink so the
             # Doppler follower in sstv_loop has the signal in the passband.
@@ -1279,6 +1331,7 @@ async def _switch_sdr_mode(mode: str):
         _mode_meteor  = None
         _mode_subghz  = None
         _mode_pager   = None
+        _mode_websdr  = None
         _mode_trunk   = None
         try:
             await loop.run_in_executor(None, sdr.stop)  # in case the failed mode left it running
@@ -1853,6 +1906,146 @@ async def api_subghz_status():
 async def api_subghz_devices():
     cur = _cur_subghz()
     return cur.device_list() if cur else []
+
+
+def _cur_websdr() -> Optional[WebSDRReceiver]:
+    return _mode_websdr if active_sdr_mode == "websdr" else None
+
+
+def _websdr_state() -> dict:
+    rx = _cur_websdr()
+    if rx is None:
+        return {"running": False, "center": WEBSDR_FREQ, "gain": WEBSDR_GAIN,
+                "modes": list(WEBSDR_MODES), "default_bw": WEBSDR_DEFAULT_BW}
+    st = rx.state()
+    return {"running": True, "center": sdr.freq, "gain": sdr.gain, "sample_rate": sdr.sample_rate,
+            "rx_freq": sdr.freq + st["rx_offset"], "view_center": sdr.freq + st["view_offset"],
+            "span": st["span"], "min_span": st["min_span"], "mode": st["mode"], "bw": st["bw"],
+            "modes": list(WEBSDR_MODES), "default_bw": WEBSDR_DEFAULT_BW}
+
+
+class WebSDRStateBody(BaseModel):
+    center:      Optional[int]   = None   # absolute Hz — retunes the dongle
+    gain:        Optional[float] = None
+    rx_freq:     Optional[float] = None   # absolute Hz, must sit inside the capture
+    mode:        Optional[str]   = None
+    bw:          Optional[float] = None
+    view_center: Optional[float] = None   # absolute Hz
+    span:        Optional[float] = None
+
+
+@app.get("/api/websdr/state")
+async def api_websdr_state():
+    return _websdr_state()
+
+
+@app.post("/api/websdr/state")
+async def api_websdr_set(body: WebSDRStateBody):
+    rx = _cur_websdr()
+    if rx is None:
+        raise HTTPException(status_code=409, detail="device 0 is not in websdr mode")
+    if body.mode is not None and body.mode not in WEBSDR_MODES:
+        raise HTTPException(status_code=400, detail=f"mode must be one of {WEBSDR_MODES}")
+    try:
+        if body.gain is not None:
+            sdr.set_gain(body.gain)
+        if body.center is not None and body.center != sdr.freq:
+            rx_abs = sdr.freq + rx.rx_offset
+            sdr.set_freq(body.center)
+            # keep the receiver where it was if it still fits, else park it mid-capture
+            keep = abs(rx_abs - body.center) < sdr.sample_rate / 2
+            rx.set_rx(rx_abs - body.center if keep else 0, rx.mode, rx.bw)
+            rx.set_view(0, rx.span)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"SDR unavailable: {exc}")
+    mode = body.mode or rx.mode
+    bw = body.bw if body.bw is not None else (WEBSDR_DEFAULT_BW[mode] if body.mode else rx.bw)
+    rx_off = body.rx_freq - sdr.freq if body.rx_freq is not None else rx.rx_offset
+    rx.set_rx(rx_off, mode, bw)
+    if body.view_center is not None or body.span is not None:
+        voff = body.view_center - sdr.freq if body.view_center is not None else rx.view_offset
+        rx.set_view(voff, body.span if body.span is not None else rx.span)
+    return _websdr_state()
+
+
+@app.websocket("/ws/websdr")
+async def ws_websdr(websocket: WebSocket):
+    await websocket.accept()
+    websdr_clients.add(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in WebSDR WebSocket handler")
+    finally:
+        websdr_clients.discard(websocket)
+
+
+@app.websocket("/ws/websdr/audio")
+async def ws_websdr_audio(websocket: WebSocket):
+    await websocket.accept()
+    websdr_audio_clients.add(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in WebSDR audio WebSocket handler")
+    finally:
+        websdr_audio_clients.discard(websocket)
+
+
+def _load_tags() -> list[dict]:
+    try:
+        with open(WEBSDR_TAGS) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
+
+
+def _save_tags(tags: list[dict]) -> None:
+    tmp = WEBSDR_TAGS + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(tags, f, indent=1)
+    os.replace(tmp, WEBSDR_TAGS)
+
+
+class WebSDRTagBody(BaseModel):
+    freq:  float
+    label: str
+    mode:  str   = "NFM"
+    bw:    float = 12_500
+    notes: str   = ""
+
+
+@app.get("/api/websdr/tags")
+async def api_websdr_tags():
+    return _load_tags()
+
+
+@app.post("/api/websdr/tags")
+async def api_websdr_tag_add(body: WebSDRTagBody):
+    if not body.label.strip():
+        raise HTTPException(status_code=400, detail="label required")
+    tags = _load_tags()
+    tag = {"id": f"{int(time.time() * 1000):x}", "freq": body.freq, "label": body.label.strip(),
+           "mode": body.mode, "bw": body.bw, "notes": body.notes.strip(), "created": time.time()}
+    tags.append(tag)
+    _save_tags(tags)
+    return tag
+
+
+@app.delete("/api/websdr/tags/{tag_id}")
+async def api_websdr_tag_delete(tag_id: str):
+    tags = _load_tags()
+    kept = [t for t in tags if t["id"] != tag_id]
+    if len(kept) == len(tags):
+        raise HTTPException(status_code=404, detail="no such tag")
+    _save_tags(kept)
+    return {"deleted": tag_id}
 
 
 @app.websocket("/ws/pager")

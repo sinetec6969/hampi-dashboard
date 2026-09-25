@@ -62,6 +62,11 @@ pager:                    # POCSAG/FLEX via rtl_fm | multimon-ng (source build f
   freq: 152007500         # retune live from the Pager page
   gain: 40.0
 
+websdr:                   # WebSDR-style page: zoomable waterfall, SSB/CW/AM/FM audio, tags
+  freq: 162400000         # starting centre — retune live from the page
+  gain: 40.0
+  # tags_file: ../websdr_tags.json
+
 ble:                      # BLE advert scan on the Pi's built-in radio — runs beside any SDR mode
   enable: true            # needs hci0 unblocked: rfkill unblock bluetooth
   ttl_s: 600              # drop devices unheard this long
