@@ -635,6 +635,10 @@ async def sdr_loop() -> None:
                 except Exception:
                     logger.exception("SDR reconnect failed — will retry")
     except asyncio.CancelledError:
+        # The in-flight read can't be cancelled once it's in the executor; rtl_tcp
+        # stopping underneath it then fails it — retrieve that so asyncio doesn't log it
+        if read_future is not None:
+            read_future.add_done_callback(lambda f: f.cancelled() or f.exception())
         logger.info("SDR loop cancelled")
 
 

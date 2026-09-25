@@ -155,11 +155,15 @@ class DMRDecoder:
         # Appended by _clear_call (sync); drained by _read_stderr (async)
         self._pending_finalize: list[dict] = []
 
+        self._stopping = False
+        self._respawn_task: Optional[asyncio.Task] = None
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
+        self._stopping = False
         if self._audio_cb and self._udp_transport is None:
             loop = asyncio.get_running_loop()
             self._udp_transport, _ = await loop.create_datagram_endpoint(
@@ -185,6 +189,9 @@ class DMRDecoder:
                 asyncio.create_task(self._drain_audio(), name="dfme-audio"))
 
     async def stop(self) -> None:
+        self._stopping = True
+        if self._respawn_task is not None and self._respawn_task is not asyncio.current_task():
+            self._respawn_task.cancel()
         for task in self._tasks:
             task.cancel()
         if self._tasks:
@@ -202,8 +209,13 @@ class DMRDecoder:
                     await self._proc.stdin.wait_closed()
                 self._proc.terminate()
                 await asyncio.wait_for(self._proc.wait(), timeout=5)
-            except (ProcessLookupError, asyncio.TimeoutError):
-                self._proc.kill()
+            except (ProcessLookupError, asyncio.TimeoutError, BrokenPipeError, ConnectionResetError):
+                # dsd-fme may already be dead (crash, or respawn racing a mode switch)
+                try:
+                    self._proc.kill()
+                    await self._proc.wait()
+                except ProcessLookupError:
+                    pass
             self._proc = None
 
         logger.info("DMRDecoder stopped")
@@ -290,6 +302,8 @@ class DMRDecoder:
                 line_bytes = await self._proc.stderr.readline()
                 if not line_bytes:
                     logger.info("dsd-fme stderr closed")
+                    if not self._stopping:
+                        self._respawn_task = asyncio.create_task(self._respawn(), name="dfme-respawn")
                     break
                 raw_log.write(line_bytes)
                 line = line_bytes.decode("ascii", errors="replace")
@@ -308,6 +322,18 @@ class DMRDecoder:
             logger.exception("Unexpected error in dsd-fme stderr reader")
         finally:
             logger.info("dsd-fme stderr reader done")
+
+    async def _respawn(self) -> None:
+        await asyncio.sleep(2)
+        if self._stopping:
+            return
+        rc = self._proc.returncode if self._proc else None
+        logger.warning("dsd-fme exited unexpectedly (rc=%s) — restarting", rc)
+        try:
+            await self.stop()
+            await self.start()
+        except Exception:
+            logger.exception("dsd-fme restart failed")
 
     def _parse_line(self, raw: str) -> Optional[DMRFrame]:
         """
