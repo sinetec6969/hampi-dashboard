@@ -153,6 +153,11 @@ signature-matching UI). `-F json` covers the actual use case.
 
 **P0.3 · NOAA APT — the cheapest real capability on the list**
 
+> **Dead — dropped 2026-09-24.** Written against a wrong premise: NOAA-18 was
+> decommissioned 2025-06-06, NOAA-19 2025-08-13, NOAA-15 2025-08-19. No APT
+> downlink remains; Celestrak's `weather` group no longer lists them.
+> METEOR-M2 3/4 LRPT (already built) is the only 137 MHz imagery left.
+
 `meteor.py` is already parameterized by `pipeline`, and `satpredict.py`
 already pulls the Celestrak `weather` TLE group — **NOAA-15/18/19 are already
 in our TLE cache.** Adding APT is a pipeline string, three frequencies, and

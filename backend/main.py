@@ -41,6 +41,7 @@ from radio import RadioInterface
 from satpredict import SatTracker
 from meteor import MeteorDecoder
 from subghz import SubGHzDecoder
+from pager import PagerDecoder
 from ble import BLEScanner
 from sdrtrunk import TrunkMonitor
 from dmr import DMRDecoder
@@ -162,6 +163,10 @@ SUBGHZ_FREQS: list[int] = [int(f) for f in cfg("subghz.freqs", [433920000, 31500
 SUBGHZ_HOP_S: int       = int(os.getenv("SUBGHZ_HOP_S", cfg("subghz.hop_s", 60)))
 SUBGHZ_GAIN: Optional[float] = cfg("subghz.gain", None)   # None = rtl_433 auto gain
 
+# Pagers (rtl_fm | multimon-ng) — POCSAG/FLEX; retunable live via /api/pager/tune
+PAGER_FREQ: int   = int(os.getenv("PAGER_FREQ", cfg("pager.freq", 152007500)))
+PAGER_GAIN: float = float(os.getenv("PAGER_GAIN", cfg("pager.gain", 40.0)))
+
 # SDRTrunk trunked-DMR (Connect Plus) monitor — runs as the `sdrtrunk` systemd
 # user service; this mode just starts/stops it so the dashboard owns the dongle.
 TRUNK_APP_DIR:  str = os.getenv("TRUNK_APP_DIR", cfg("trunk.app_dir",
@@ -243,6 +248,7 @@ aprs_clients:       Set[WebSocket] = set()
 ax25_clients:       Set[WebSocket] = set()
 meteor_clients:     Set[WebSocket] = set()
 subghz_clients:     Set[WebSocket] = set()
+pager_clients:      Set[WebSocket] = set()
 trunk_clients:      Set[WebSocket] = set()
 
 _mode_sstv: Optional[SSTVDecoder] = None
@@ -250,6 +256,7 @@ _mode_aprs: Optional[APRSDecoder] = None
 _mode_ax25: Optional[AX25Decoder] = None  # rides along with aprs mode (shared direwolf)
 _mode_meteor: Optional[MeteorDecoder] = None  # SatDump owns device 0 directly
 _mode_subghz: Optional[SubGHzDecoder] = None  # rtl_433 owns device 0 directly
+_mode_pager:  Optional[PagerDecoder]  = None  # rtl_fm owns device 0 directly
 _mode_trunk:  Optional[TrunkMonitor]  = None  # SDRTrunk service owns device 0
 satellite_monitor: Optional[SatelliteMonitor] = None
 ble_scanner: Optional[BLEScanner] = None
@@ -426,6 +433,10 @@ async def on_meteor_image(msg: dict) -> None:
 
 async def on_subghz_msg(msg: dict) -> None:
     await broadcast_json(subghz_clients, msg)
+
+
+async def on_pager_msg(msg: dict) -> None:
+    await broadcast_json(pager_clients, msg)
 
 
 async def on_trunk_status(msg: dict) -> None:
@@ -791,6 +802,8 @@ async def lifespan(app: FastAPI):
         await _mode_meteor.stop()
     if _mode_subghz is not None:
         await _mode_subghz.stop()
+    if _mode_pager is not None:
+        await _mode_pager.stop()
     if scanner is not None:
         await scanner.stop()
     if adsb_decoder is not None:
@@ -952,6 +965,7 @@ MODE_TOOLS: dict[str, list[str]] = {
     "aprs":    ["rtl_tcp", "direwolf"],
     "meteor":  ["rtl_tcp", "satdump"],
     "subghz":  ["rtl_433"],
+    "pager":   ["rtl_fm", "multimon-ng"],
 }
 TOOL_HINTS: dict[str, str] = {
     "rtl_tcp":  "source build: rtl-sdr-blog",
@@ -960,6 +974,8 @@ TOOL_HINTS: dict[str, str] = {
     "direwolf": "sudo apt install direwolf",
     "satdump":  "sudo apt install satdump",
     "rtl_433":  "source build: rtl_433 against rtl-sdr-blog",
+    "rtl_fm":   "source build: rtl-sdr-blog",
+    "multimon-ng": "source build: multimon-ng (apt 1.3 lacks --json)",
 }
 
 
@@ -1031,6 +1047,10 @@ def _cur_subghz() -> Optional[SubGHzDecoder]:
     return _mode_subghz if active_sdr_mode == "subghz" else None
 
 
+def _cur_pager() -> Optional[PagerDecoder]:
+    return _mode_pager if active_sdr_mode == "pager" else None
+
+
 def _cur_trunk() -> Optional[TrunkMonitor]:
     return _mode_trunk if active_sdr_mode == "trunk" else None
 
@@ -1046,7 +1066,7 @@ async def api_get_sdr_mode():
 
 @app.post("/api/sdr/mode")
 async def api_set_sdr_mode(mode: str):
-    VALID = ("dmr", "scanner", "adsb", "sstv", "aprs", "meteor", "subghz", "trunk")
+    VALID = ("dmr", "scanner", "adsb", "sstv", "aprs", "meteor", "subghz", "pager", "trunk")
     if mode not in VALID:
         raise HTTPException(status_code=400, detail=f"mode must be one of {VALID}")
     async with _mode_lock:
@@ -1054,7 +1074,7 @@ async def api_set_sdr_mode(mode: str):
 
 
 async def _switch_sdr_mode(mode: str):
-    global active_sdr_mode, sdr_task, _mode_scanner, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor, _mode_subghz, _mode_trunk
+    global active_sdr_mode, sdr_task, _mode_scanner, _mode_adsb, _mode_sstv, _mode_aprs, _mode_ax25, _mode_meteor, _mode_subghz, _mode_pager, _mode_trunk
 
     if mode == active_sdr_mode:
         return {"mode": active_sdr_mode}
@@ -1089,6 +1109,10 @@ async def _switch_sdr_mode(mode: str):
         if _mode_subghz is not None:
             await _mode_subghz.stop()
             _mode_subghz = None
+    elif active_sdr_mode == "pager":
+        if _mode_pager is not None:
+            await _mode_pager.stop()
+            _mode_pager = None
 
     elif active_sdr_mode == "trunk":
         if _mode_trunk is not None:
@@ -1180,6 +1204,17 @@ async def _switch_sdr_mode(mode: str):
             )
             await _mode_subghz.start()
 
+        elif mode == "pager":
+            # rtl_fm owns device 0 directly (rtl_tcp stopped above).
+            _mode_pager = PagerDecoder(
+                freq=PAGER_FREQ,
+                gain=PAGER_GAIN,
+                rtl_device=sdr.device_index if isinstance(sdr.device_index, int) else 0,
+                message_callback=on_pager_msg,
+                status_callback=on_pager_msg,
+            )
+            await _mode_pager.start()
+
         elif mode == "trunk":
             # SDRTrunk service claims device 0 over libusb (rtl_tcp stopped above).
             _mode_trunk = TrunkMonitor(
@@ -1225,7 +1260,7 @@ async def _switch_sdr_mode(mode: str):
         # Stop anything partially started — a leaked subprocess keeps device 0
         # busy and the DMR fallback below would fail too.
         for obj in (_mode_scanner, _mode_adsb, _mode_sstv, _mode_aprs,
-                    _mode_ax25, _mode_meteor, _mode_subghz, _mode_trunk):
+                    _mode_ax25, _mode_meteor, _mode_subghz, _mode_pager, _mode_trunk):
             if obj is not None:
                 try:
                     await obj.stop()
@@ -1238,6 +1273,7 @@ async def _switch_sdr_mode(mode: str):
         _mode_ax25    = None
         _mode_meteor  = None
         _mode_subghz  = None
+        _mode_pager   = None
         _mode_trunk   = None
         try:
             await loop.run_in_executor(None, sdr.stop)  # in case the failed mode left it running
@@ -1812,6 +1848,52 @@ async def api_subghz_status():
 async def api_subghz_devices():
     cur = _cur_subghz()
     return cur.device_list() if cur else []
+
+
+@app.websocket("/ws/pager")
+async def ws_pager(websocket: WebSocket):
+    await websocket.accept()
+    pager_clients.add(websocket)
+    try:
+        cur = _cur_pager()
+        if cur:
+            await websocket.send_text(json.dumps(cur.status_dict()))
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in pager WebSocket handler")
+    finally:
+        pager_clients.discard(websocket)
+
+
+@app.get("/api/pager/status")
+async def api_pager_status():
+    cur = _cur_pager()
+    if cur:
+        return cur.status_dict()
+    return {"type": "status", "running": False, "freq": PAGER_FREQ, "gain": PAGER_GAIN,
+            "count": 0, "last_log": ""}
+
+
+@app.get("/api/pager/messages")
+async def api_pager_messages():
+    cur = _cur_pager()
+    return list(cur.messages) if cur else []
+
+
+@app.post("/api/pager/tune")
+async def api_pager_tune(freq: int, gain: Optional[float] = None):
+    cur = _cur_pager()
+    if cur is None:
+        raise HTTPException(status_code=409, detail="device 0 is not in pager mode")
+    async with _mode_lock:
+        try:
+            await cur.retune(freq, gain)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"retune failed: {exc}")
+    return cur.status_dict()
 
 
 @app.get("/api/meteor/status")

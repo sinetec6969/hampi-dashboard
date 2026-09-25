@@ -58,6 +58,10 @@ subghz:                   # sub-GHz ISM devices via rtl_433 (source build agains
   hop_s: 60
   # gain: 40.0            # omit for rtl_433 auto gain
 
+pager:                    # POCSAG/FLEX via rtl_fm | multimon-ng (source build for --json)
+  freq: 152007500         # retune live from the Pager page
+  gain: 40.0
+
 ble:                      # BLE advert scan on the Pi's built-in radio — runs beside any SDR mode
   enable: true            # needs hci0 unblocked: rfkill unblock bluetooth
   ttl_s: 600              # drop devices unheard this long

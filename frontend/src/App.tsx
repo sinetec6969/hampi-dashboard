@@ -15,6 +15,7 @@ import RadioPage from './pages/RadioPage'
 import MeteorPage from './pages/MeteorPage'
 import SubGHzPage from './pages/SubGHzPage'
 import BLEPage from './pages/BLEPage'
+import PagerPage from './pages/PagerPage'
 import SatellitePage from './pages/SatellitePage'
 import HamClockPage from './pages/HamClockPage'
 import AllScanPage from './pages/AllScanPage'
@@ -43,6 +44,7 @@ const NAV_LINKS = [
   { to: '/meteor',      label: 'METEOR' },
   { to: '/subghz',      label: 'Sub-GHz' },
   { to: '/ble',         label: 'BLE' },
+  { to: '/pager',       label: 'Pager' },
   { to: '/satellite',   label: 'Satellite' },
   { to: '/hamclock',    label: 'HamClock' },
   { to: '/allscan',     label: 'AllScan' },
@@ -93,6 +95,7 @@ export default function App() {
           <Route path="/meteor"     element={<MeteorPage />} />
           <Route path="/subghz"     element={<SubGHzPage />} />
           <Route path="/ble"        element={<BLEPage />} />
+          <Route path="/pager"      element={<PagerPage />} />
           <Route path="/satellite"  element={<SatellitePage />} />
           <Route path="/hamclock"   element={<HamClockPage />} />
           <Route path="/allscan"    element={<AllScanPage />} />

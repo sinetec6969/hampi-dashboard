@@ -179,6 +179,7 @@ const CARDS: CardDef[] = [
   { name: 'SSTV',      path: '/sstv',       sub: '145.800 MHz FM',               sdr: 'sstv' },
   { name: 'METEOR',    path: '/meteor',     sub: '137.9 MHz QPSK · SatDump',     sdr: 'meteor' },
   { name: 'SUB-GHZ',   path: '/subghz',     sub: '433.92 / 315 MHz · rtl_433',   sdr: 'subghz' },
+  { name: 'PAGER',     path: '/pager',      sub: 'POCSAG · FLEX · multimon-ng',  sdr: 'pager' },
   { name: 'MESHTASTIC', path: '/meshtastic', sub: 'LoRa mesh · USB serial',      independent: true },
   { name: 'SATELLITE', path: '/satellite',  sub: 'TinyGS · Mosquitto',           independent: true },
   { name: 'BLE',       path: '/ble',        sub: '2.4 GHz · built-in radio',     independent: true },
