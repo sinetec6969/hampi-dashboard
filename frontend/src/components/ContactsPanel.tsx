@@ -99,40 +99,40 @@ export default function ContactsPanel() {
     <div className="panel" style={{ flex: '2', display: 'flex', flexDirection: 'column', overflowY: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span className="panel-title">Contacts</span>
-        <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#3d6b52' }}>{contacts.length}</span>
+        <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#66716c' }}>{contacts.length}</span>
       </div>
 
       <div style={{ overflowY: 'auto', flex: 1 }}>
         {contacts.length === 0 && (
-          <div style={{ color: '#3d6b52', fontSize: '0.7rem' }}>Nobody heard yet — callers stack up here as voice frames decode.</div>
+          <div style={{ color: '#66716c', fontSize: '0.7rem' }}>Nobody heard yet — callers stack up here as voice frames decode.</div>
         )}
         {contacts.map(c => (
           <div key={c.src_id} style={{
-            borderBottom: '1px solid #0d2418',
+            borderBottom: '1px solid #252b2c',
             padding: '3px 0',
             fontSize: '0.7rem',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
               <span className="badge badge-blue">TS{c.timeslot + 1}</span>
               {c.dst_id > 0 && (
-                <span style={{ color: '#4d7a62', fontSize: '0.65rem' }}>TG{c.dst_id}</span>
+                <span style={{ color: '#66716c', fontSize: '0.65rem' }}>TG{c.dst_id}</span>
               )}
               {c.callsign ? (
                 <a
                   href={qrzLink(c.callsign)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: '#00ff88', fontWeight: 'bold', textDecoration: 'none', fontSize: '0.78rem' }}
+                  style={{ color: '#35d07f', fontWeight: 'bold', textDecoration: 'none', fontSize: '0.78rem' }}
                 >
                   {c.callsign}
                 </a>
               ) : (
-                <span style={{ color: '#7fbf9a' }}>{c.src_id}</span>
+                <span style={{ color: '#9aa5a0' }}>{c.src_id}</span>
               )}
-              <span style={{ color: '#3d6b52', fontSize: '0.62rem', marginLeft: 'auto' }}>{fmt(c.lastSeen)}</span>
+              <span style={{ color: '#66716c', fontSize: '0.62rem', marginLeft: 'auto' }}>{fmt(c.lastSeen)}</span>
             </div>
             {(c.name || c.city) && (
-              <div style={{ color: '#58a67a', fontSize: '0.65rem', paddingLeft: 4, marginTop: 1 }}>
+              <div style={{ color: '#9aa5a0', fontSize: '0.65rem', paddingLeft: 4, marginTop: 1 }}>
                 {c.name}{c.city ? `  ${c.city}${c.state ? ', ' + c.state : ''}` : ''}
               </div>
             )}

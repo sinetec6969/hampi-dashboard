@@ -76,16 +76,16 @@ export default function MeteorPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10, padding: 12 }}>
       <div className="header">
-        <span className="header-title">┌─ METEOR LRPT</span>
+        <span className="header-title">METEOR LRPT</span>
         <span className="header-freq">{((st?.freq ?? 137900000) / 1e6).toFixed(3)} MHz QPSK</span>
         <span className={'badge ' + (active && st?.running ? 'badge-green' : 'badge-red')}>
           {active && st?.running ? '● Decoding' : '○ Idle'}
         </span>
         {active && st && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#7fbf9a' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa5a0' }}>
             SNR {st.snr.toFixed(1)} dB
-            <span style={{ width: 80, height: 8, background: '#0d2418', display: 'inline-block' }}>
-              <span style={{ width: `${snrPct}%`, height: '100%', background: snrPct > 40 ? '#33ff66' : '#ffb000', display: 'block' }} />
+            <span style={{ width: 80, height: 8, background: '#252b2c', display: 'inline-block' }}>
+              <span style={{ width: `${snrPct}%`, height: '100%', background: snrPct > 40 ? '#35d07f' : '#e5a93d', display: 'block' }} />
             </span>
           </span>
         )}
@@ -105,16 +105,16 @@ export default function MeteorPage() {
       )}
 
       {/* Pass prediction */}
-      <div style={{ border: '1px solid #1d4030', background: '#0c0c0c', padding: 10, fontSize: 13 }}>
-        <div style={{ color: '#00b95f', fontWeight: 600, marginBottom: 4 }}>┌─ METEOR PASSES</div>
-        {sats.length === 0 && <div style={{ color: '#7fbf9a' }}>No TLEs — the Celestrak fetch failed. Check the Pi's network; TLEs retry on restart.</div>}
+      <div style={{ border: '1px solid #343c3d', background: '#0d1011', padding: 10, fontSize: 13 }}>
+        <div style={{ color: '#35d07f', fontWeight: 600, marginBottom: 4 }}>METEOR passes</div>
+        {sats.length === 0 && <div style={{ color: '#9aa5a0' }}>No TLEs — the Celestrak fetch failed. Check the Pi's network; TLEs retry on restart.</div>}
         {sats.map(s => (
-          <div key={s.norad} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, padding: '4px 0', borderTop: '1px solid #1c1c1c', alignItems: 'center' }}>
-            <span title={s.desc}>{s.name} <span style={{ color: '#58a67a', fontSize: 11 }}>{(s.freq / 1e6).toFixed(3)} {s.mode}</span></span>
-            <span style={{ color: s.visible ? '#33ff66' : '#58a67a', textAlign: 'right' }}>
+          <div key={s.norad} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, padding: '4px 0', borderTop: '1px solid #252b2c', alignItems: 'center' }}>
+            <span title={s.desc}>{s.name} <span style={{ color: '#9aa5a0', fontSize: 11 }}>{(s.freq / 1e6).toFixed(3)} {s.mode}</span></span>
+            <span style={{ color: s.visible ? '#35d07f' : '#9aa5a0', textAlign: 'right' }}>
               {s.el != null ? `${s.visible ? '↑' : '↓'}${s.el}°` : '—'}
             </span>
-            <span style={{ color: '#7fbf9a', minWidth: 110, textAlign: 'right', fontSize: 12 }}>
+            <span style={{ color: '#9aa5a0', minWidth: 110, textAlign: 'right', fontSize: 12 }}>
               {s.visible ? 'OVERHEAD' : (s.next_pass ? `AOS in ${countdown(s.next_pass.aos_ts)}${s.next_pass.max_el ? ` · ${s.next_pass.max_el}°` : ''}` : 'no pass 3d')}
             </span>
           </div>
@@ -122,18 +122,18 @@ export default function MeteorPage() {
       </div>
 
       {active && st?.last_log && (
-        <div style={{ fontFamily: 'inherit', fontSize: 11, color: '#5a5', background: '#000', border: '1px solid #0d2418', padding: '4px 8px', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+        <div style={{ fontFamily: 'inherit', fontSize: 11, color: '#9aa5a0', background: '#000', border: '1px solid #252b2c', padding: '4px 8px', overflowX: 'auto', whiteSpace: 'nowrap' }}>
           {st.last_log}
         </div>
       )}
 
       {/* Image gallery */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        <div style={{ color: '#7fbf9a', fontSize: 12, marginBottom: 6 }}>
-          MSU-MR products <span style={{ color: '#4d7a62' }}>({images.length})</span>
+        <div style={{ color: '#9aa5a0', fontSize: 12, marginBottom: 6 }}>
+          MSU-MR products <span style={{ color: '#66716c' }}>({images.length})</span>
         </div>
         {images.length === 0 ? (
-          <div style={{ color: '#4d7a62', padding: 12 }}>
+          <div style={{ color: '#66716c', padding: 12 }}>
             No imagery yet — LRPT only transmits while a METEOR is overhead. Be in this mode
             when the pass table above says AOS, stay until LOS, and the composites appear here.
           </div>
@@ -141,9 +141,9 @@ export default function MeteorPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
             {images.map(img => (
               <div key={img.path} onClick={() => setLightbox(img.url)} title={img.path}
-                   style={{ cursor: 'pointer', border: '1px solid #0d2418', background: '#040805' }}>
+                   style={{ cursor: 'pointer', border: '1px solid #252b2c', background: '#0d1011' }}>
                 <img src={img.url} alt={img.path} loading="lazy" style={{ width: '100%', display: 'block' }} />
-                <div style={{ fontSize: 10, color: '#7fbf9a', padding: '2px 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 10, color: '#9aa5a0', padding: '2px 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {img.path.split('/').pop()}
                 </div>
               </div>

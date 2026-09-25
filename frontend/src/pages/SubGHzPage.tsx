@@ -85,15 +85,15 @@ export default function SubGHzPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10, padding: 12 }}>
       <div className="header">
-        <span className="header-title">┌─ SUB-GHZ ISM</span>
+        <span className="header-title">Sub-GHz ISM</span>
         <span className="header-freq">
           {active && st?.cur_freq ? `${mhz(st.cur_freq)} MHz` : freqs.map(mhz).join(' / ') + ' MHz'}
         </span>
         <span className={'badge ' + (active && st?.running ? 'badge-green' : 'badge-red')}>
           {active && st?.running ? '● Listening' : '○ Idle'}
         </span>
-        {active && st?.hop_s && <span style={{ fontSize: 12, color: '#7fbf9a' }}>hop {st.hop_s}s</span>}
-        <span style={{ fontSize: 12, color: '#7fbf9a' }}>{devices.length} devices</span>
+        {active && st?.hop_s && <span style={{ fontSize: 12, color: '#9aa5a0' }}>hop {st.hop_s}s</span>}
+        <span style={{ fontSize: 12, color: '#9aa5a0' }}>{devices.length} devices</span>
       </div>
 
       {!active && (
@@ -110,21 +110,21 @@ export default function SubGHzPage() {
       )}
 
       {active && st?.last_log && (
-        <div style={{ fontSize: 11, color: '#5a5', background: '#000', border: '1px solid #0d2418', padding: '4px 8px', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 11, color: '#9aa5a0', background: '#000', border: '1px solid #252b2c', padding: '4px 8px', overflowX: 'auto', whiteSpace: 'nowrap' }}>
           {st.last_log}
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid #1d4030', background: '#040805' }}>
-        <div style={{ color: '#00b95f', fontWeight: 600, fontSize: 13, padding: '8px 10px 4px' }}>┌─ DEVICES HEARD</div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid #343c3d', background: '#0d1011' }}>
+        <div style={{ color: '#35d07f', fontWeight: 600, fontSize: 13, padding: '8px 10px 4px' }}>Devices heard</div>
         {devices.length === 0 ? (
-          <div style={{ color: '#4d7a62', padding: 12, fontSize: 13 }}>
+          <div style={{ color: '#66716c', padding: 12, fontSize: 13 }}>
             Nothing decoded yet. Sensors transmit every 30–60 s; TPMS only while a car is rolling past.
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ color: '#4d7a62', textAlign: 'left' }}>
+              <tr style={{ color: '#66716c', textAlign: 'left' }}>
                 <th style={{ padding: '4px 10px' }}>MODEL</th><th>ID</th><th>CH</th>
                 <th style={{ textAlign: 'right' }}>×</th><th style={{ textAlign: 'right' }}>LAST</th>
                 <th style={{ textAlign: 'right' }}>RSSI</th><th style={{ paddingLeft: 12 }}>READINGS</th>
@@ -132,14 +132,14 @@ export default function SubGHzPage() {
             </thead>
             <tbody>
               {devices.map(d => (
-                <tr key={d.key} style={{ borderTop: '1px solid #0d2418', color: '#a8e8c4' }}>
-                  <td style={{ padding: '4px 10px', color: '#c8ffe0' }}>{d.model}</td>
+                <tr key={d.key} style={{ borderTop: '1px solid #252b2c', color: '#cfd6d2' }}>
+                  <td style={{ padding: '4px 10px', color: '#e7ece9' }}>{d.model}</td>
                   <td>{d.id ?? '—'}</td>
                   <td>{d.channel ?? '—'}</td>
                   <td style={{ textAlign: 'right' }}>{d.count}</td>
-                  <td style={{ textAlign: 'right', color: now / 1000 - d.last < 120 ? '#00ff88' : '#6aa886' }}>{ago(d.last, now)}</td>
+                  <td style={{ textAlign: 'right', color: now / 1000 - d.last < 120 ? '#35d07f' : '#8a9590' }}>{ago(d.last, now)}</td>
                   <td style={{ textAlign: 'right' }}>{d.rssi != null ? d.rssi.toFixed(1) : '—'}</td>
-                  <td style={{ paddingLeft: 12, color: '#7fbf9a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 360 }}>
+                  <td style={{ paddingLeft: 12, color: '#9aa5a0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 360 }}>
                     {readings(d.last_event)}
                   </td>
                 </tr>
@@ -150,11 +150,11 @@ export default function SubGHzPage() {
       </div>
 
       {events.length > 0 && (
-        <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid #0d2418', background: '#000', padding: '4px 8px', fontSize: 11, color: '#7fbf9a' }}>
+        <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid #252b2c', background: '#000', padding: '4px 8px', fontSize: 11, color: '#9aa5a0' }}>
           {events.map((e, i) => (
             <div key={i} style={{ whiteSpace: 'nowrap' }}>
-              <span style={{ color: '#4d7a62' }}>{e.time ? new Date(Number(e.time) * 1000).toLocaleTimeString() : ''}</span>{' '}
-              <span style={{ color: '#c8ffe0' }}>{e.model}</span> {String(e.id ?? '')} {readings(e)}
+              <span style={{ color: '#66716c' }}>{e.time ? new Date(Number(e.time) * 1000).toLocaleTimeString() : ''}</span>{' '}
+              <span style={{ color: '#e7ece9' }}>{e.model}</span> {String(e.id ?? '')} {readings(e)}
             </div>
           ))}
         </div>

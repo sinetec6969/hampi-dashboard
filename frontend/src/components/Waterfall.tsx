@@ -137,13 +137,13 @@ export default function Waterfall({ centerFreqHz, onClickTune, palette = 'classi
       const green = paletteRef.current === 'green'
       const cf = centerFreqRef.current
       if (green) {
-        ctx.strokeStyle = 'rgba(0,255,136,0.35)'
+        ctx.strokeStyle = 'rgba(53,208,127,0.35)'
         ctx.lineWidth = 1
         ctx.beginPath(); ctx.moveTo(display.width / 2, 0); ctx.lineTo(display.width / 2, h - 16); ctx.stroke()
       }
       ctx.fillStyle = green ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.6)'
       ctx.fillRect(0, h - (green ? 16 : 18), display.width, green ? 16 : 18)
-      ctx.fillStyle = green ? '#4d7a62' : '#aaa'; ctx.font = "10px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center'
+      ctx.fillStyle = '#9aa5a0'; ctx.font = "11px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center'
       for (const t of [-1.0, -0.5, 0, 0.5, 1.0]) {
         const x = ((t + 1) / 2) * display.width
         ctx.fillText(((cf + t * BW / 2) / 1e6).toFixed(3) + 'M', x, h - 4)
@@ -152,15 +152,15 @@ export default function Waterfall({ centerFreqHz, onClickTune, palette = 'classi
       // Hover crosshair
       const hx = hoverXRef.current
       if (hx !== null && onClickTuneRef.current) {
-        ctx.strokeStyle = 'rgba(0,255,136,0.75)'
+        ctx.strokeStyle = 'rgba(53,208,127,0.75)'
         ctx.lineWidth = 1
         ctx.beginPath(); ctx.moveTo(hx, 0); ctx.lineTo(hx, h - 20); ctx.stroke()
 
         const hFreqMHz = (cf + (hx / N_FFT - 0.5) * BW) / 1e6
         const label = hFreqMHz.toFixed(4) + ' MHz'
-        ctx.font = '10px monospace'
+        ctx.font = "11px 'IBM Plex Mono', monospace"
         ctx.textAlign = hx > N_FFT / 2 ? 'right' : 'left'
-        ctx.fillStyle = '#00ff88'
+        ctx.fillStyle = '#35d07f'
         ctx.fillText(label, hx + (hx > N_FFT / 2 ? -6 : 6), 14)
       }
 

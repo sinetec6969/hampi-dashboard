@@ -20,7 +20,7 @@ interface MapContact {
 
 // Glowing green dot — matches dashboard theme, avoids default icon path issues
 const pinIcon = L.divIcon({
-  html: '<div style="width:11px;height:11px;background:#00ff88;border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px #00ff88,0 0 2px #fff"></div>',
+  html: '<div style="width:11px;height:11px;background:#35d07f;border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px #35d07f,0 0 2px #fff"></div>',
   className: '',
   iconSize:    [11, 11],
   iconAnchor:  [5,  5],
@@ -110,7 +110,7 @@ export default function MapPanel() {
       {/* contact count badge */}
       <div style={{
         position: 'absolute', top: 6, right: 8, zIndex: 1000,
-        fontSize: '0.65rem', color: '#7fbf9a', pointerEvents: 'none',
+        fontSize: '0.65rem', color: '#9aa5a0', pointerEvents: 'none',
       }}>
         {contacts.length > 0 && `${contacts.length} pinned`}
       </div>
@@ -119,8 +119,8 @@ export default function MapPanel() {
       {contacts.length === 0 && !geocodeOn && (
         <div style={{
           position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-          zIndex: 1000, background: '#111c', border: '1px solid #1d4030',
-          padding: '6px 12px', fontSize: '0.68rem', color: '#7fbf9a', pointerEvents: 'none',
+          zIndex: 1000, background: '#111c', border: '1px solid #343c3d',
+          padding: '6px 12px', fontSize: '0.68rem', color: '#9aa5a0', pointerEvents: 'none',
           maxWidth: '90%', textAlign: 'center',
         }}>
           No pins: geocoding is off (the default — it sends heard callers' city/state to
@@ -148,11 +148,11 @@ export default function MapPanel() {
                   <div style={{ fontSize: '0.8rem', marginTop: 2 }}>{c.name}</div>
                 )}
                 {c.city && (
-                  <div style={{ fontSize: '0.75rem', color: '#58a67a', marginTop: 1 }}>
+                  <div style={{ fontSize: '0.75rem', color: '#9aa5a0', marginTop: 1 }}>
                     {c.city}{c.state ? `, ${c.state}` : ''}
                   </div>
                 )}
-                <div style={{ fontSize: '0.7rem', color: '#7fbf9a', marginTop: 4, borderTop: '1px solid #c8ffe0', paddingTop: 3 }}>
+                <div style={{ fontSize: '0.7rem', color: '#9aa5a0', marginTop: 4, borderTop: '1px solid #e7ece9', paddingTop: 3 }}>
                   ID {c.src_id} · TS{c.timeslot + 1}{c.dst_id > 0 ? ` · TG${c.dst_id}` : ''}
                 </div>
                 <div style={{ marginTop: 4 }}>

@@ -1,7 +1,14 @@
-import { useState, useEffect } from 'react'
-import { Routes, Route, NavLink } from 'react-router-dom'
+import { useState, useEffect, type ComponentType } from 'react'
+import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom'
+import {
+  LayoutDashboard, RadioTower, AudioWaveform, Mic, Network, Radar, MessageSquareText,
+  MapPin, SquareTerminal, Waypoints, Plane, Image, CloudSun, Satellite, Antenna,
+  Bluetooth, Siren, Clock, Menu, X, Activity,
+} from 'lucide-react'
 import './App.css'
-import ModeLock from './components/ModeLock'
+import { useMode, type SdrMode } from './mode'
+import ModeStatus from './components/ModeStatus'
+import { StatusDot } from './components/ui'
 import Home from './pages/Home'
 import DMRPage from './pages/DMRPage'
 import TrunkPage from './pages/TrunkPage'
@@ -21,89 +28,126 @@ import SatellitePage from './pages/SatellitePage'
 import HamClockPage from './pages/HamClockPage'
 import AllScanPage from './pages/AllScanPage'
 
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches)
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)')
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
-  return isMobile
+interface NavDef { to: string; label: string; icon: ComponentType; sdr?: SdrMode }
+const NAV: { group: string; items: NavDef[] }[] = [
+  { group: 'Monitoring', items: [
+    { to: '/',        label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/websdr',  label: 'WebSDR',    icon: AudioWaveform, sdr: 'websdr' },
+    { to: '/allscan', label: 'AllScan',   icon: RadioTower },
+  ] },
+  { group: 'Voice & scanning', items: [
+    { to: '/dmr',     label: 'DMR',     icon: Mic,               sdr: 'dmr' },
+    { to: '/trunk',   label: 'Trunk',   icon: Network,           sdr: 'trunk' },
+    { to: '/scanner', label: 'Scanner', icon: Radar,             sdr: 'scanner' },
+    { to: '/pager',   label: 'Pager',   icon: MessageSquareText, sdr: 'pager' },
+  ] },
+  { group: 'Packet & data', items: [
+    { to: '/aprs',       label: 'APRS',       icon: MapPin,         sdr: 'aprs' },
+    { to: '/ax25',       label: 'AX.25',      icon: SquareTerminal, sdr: 'aprs' },
+    { to: '/meshtastic', label: 'Meshtastic', icon: Waypoints },
+  ] },
+  { group: 'Air & satellite', items: [
+    { to: '/adsb',      label: 'ADS-B',     icon: Plane,     sdr: 'adsb' },
+    { to: '/sstv',      label: 'SSTV',      icon: Image,     sdr: 'sstv' },
+    { to: '/meteor',    label: 'METEOR',    icon: CloudSun,  sdr: 'meteor' },
+    { to: '/satellite', label: 'Satellite', icon: Satellite },
+  ] },
+  { group: 'Spectrum & devices', items: [
+    { to: '/subghz', label: 'Sub-GHz',  icon: Antenna, sdr: 'subghz' },
+    { to: '/ble',    label: 'BLE',      icon: Bluetooth },
+    { to: '/radio',  label: 'Radio TX', icon: Siren },
+  ] },
+  { group: 'Tools', items: [
+    { to: '/hamclock', label: 'HamClock', icon: Clock },
+  ] },
+]
+const pad = (n: number) => String(n).padStart(2, '0')
+
+function Clock24() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
+  return (
+    <div className="topbar-clock" title="local · UTC">
+      <span>{pad(now.getHours())}:{pad(now.getMinutes())}:{pad(now.getSeconds())}</span>
+      <span>{pad(now.getUTCHours())}:{pad(now.getUTCMinutes())}Z</span>
+    </div>
+  )
 }
 
-const NAV_LINKS = [
-  { to: '/dmr',         label: 'DMR' },
-  { to: '/trunk',       label: 'Trunk' },
-  { to: '/adsb',        label: 'ADS-B' },
-  { to: '/aprs',        label: 'APRS' },
-  { to: '/ax25',        label: 'AX.25' },
-  { to: '/radio',       label: 'Radio TX' },
-  { to: '/meshtastic',  label: 'Meshtastic' },
-  { to: '/scanner',     label: 'Scanner' },
-  { to: '/sstv',        label: 'SSTV' },
-  { to: '/meteor',      label: 'METEOR' },
-  { to: '/subghz',      label: 'Sub-GHz' },
-  { to: '/ble',         label: 'BLE' },
-  { to: '/pager',       label: 'Pager' },
-  { to: '/websdr',      label: 'WebSDR' },
-  { to: '/satellite',   label: 'Satellite' },
-  { to: '/hamclock',    label: 'HamClock' },
-  { to: '/allscan',     label: 'AllScan' },
-]
-
-const SCAN_KEY = 'hampi-scanlines'
-
 export default function App() {
-  const isMobile = useIsMobile()
-  const [scanlines, setScanlines] = useState(() => localStorage.getItem(SCAN_KEY) !== 'off')
-  function toggleScanlines() {
-    setScanlines(v => { localStorage.setItem(SCAN_KEY, v ? 'off' : 'on'); return !v })
-  }
+  const { actualMode, online } = useMode()
+  const [navOpen, setNavOpen] = useState(false)
+  const location = useLocation()
+  // close the phone drawer whenever the route changes
+  const [lastPath, setLastPath] = useState(location.pathname)
+  if (lastPath !== location.pathname) { setLastPath(location.pathname); setNavOpen(false) }
+
   return (
-    <div className={`app-shell${isMobile ? ' mobile' : ''}`}>
-      {scanlines && <div className="rx-scanlines" />}
-      <nav className="app-nav">
-        <NavLink to="/" end className="app-nav-brand">▚ HAMPI://RX</NavLink>
-        <div className="app-nav-links">
-          {NAV_LINKS.map(l => (
-            <NavLink
-              key={l.to}
-              to={l.to}
-              className={({ isActive }) => 'app-nav-link' + (isActive ? ' active' : '')}
-            >
-              {l.label}
-            </NavLink>
-          ))}
+    <div className={`shell${navOpen ? ' nav-open' : ''}`}>
+      <header className="topbar">
+        <button className="btn btn-ghost topbar-menu" aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+          onClick={() => setNavOpen(v => !v)}>
+          {navOpen ? <X /> : <Menu />}
+        </button>
+        <Link to="/" className="brand" aria-label="HamPi dashboard">
+          <span className="brand-mark"><Activity /></span>
+          <span className="brand-text">
+            <span className="brand-name">HamPi</span>
+            <span className="brand-sub">RF Monitoring Console</span>
+          </span>
+        </Link>
+        <div className="topbar-status">
+          <ModeStatus />
+          <span className={`topbar-chip hide-sm${online === false ? ' err' : ''}`}
+            title="backend reachability (polled every 5 s)">
+            <StatusDot tone={online === null ? 'gray' : online ? 'green' : 'red'} />
+            {online === null ? 'Connecting' : online ? 'Online' : 'Offline'}
+          </span>
+          <Clock24 />
         </div>
-        <button onClick={toggleScanlines} title="CRT scanlines" style={{
-          background: 'none', border: '1px solid #1d4030', color: scanlines ? '#00ff88' : '#3d6b52',
-          cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, padding: '3px 7px', marginLeft: 'auto', marginRight: 8,
-        }}>▦</button>
-        <ModeLock />
+      </header>
+
+      <nav className="sidebar" aria-label="Modes">
+        {NAV.map(g => (
+          <div key={g.group} className="nav-group">
+            <div className="nav-group-label">{g.group}</div>
+            {g.items.map(({ to, label, icon: Icon, sdr }) => (
+              <NavLink key={to} to={to} end={to === '/'} title={label}
+                className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <Icon />
+                <span className="nav-label">{label}</span>
+                {sdr && actualMode === sdr && <span className="nav-live"><StatusDot tone="green" title="owns device 0" /></span>}
+              </NavLink>
+            ))}
+          </div>
+        ))}
       </nav>
-      <div className="app-content">
-        <Routes>
-          <Route path="/"           element={<Home />} />
-          <Route path="/dmr"        element={<DMRPage />} />
-          <Route path="/trunk"      element={<TrunkPage />} />
-          <Route path="/adsb"       element={<ADSBPage />} />
-          <Route path="/aprs"       element={<APRSPage />} />
-          <Route path="/ax25"       element={<AX25Page />} />
-          <Route path="/radio"      element={<RadioPage />} />
-          <Route path="/meshtastic" element={<MeshtasticPage />} />
-          <Route path="/scanner"    element={<ScannerPage />} />
-          <Route path="/sstv"       element={<SSTVPage />} />
-          <Route path="/meteor"     element={<MeteorPage />} />
-          <Route path="/subghz"     element={<SubGHzPage />} />
-          <Route path="/ble"        element={<BLEPage />} />
-          <Route path="/pager"      element={<PagerPage />} />
-          <Route path="/websdr"     element={<WebSDRPage />} />
-          <Route path="/satellite"  element={<SatellitePage />} />
-          <Route path="/hamclock"   element={<HamClockPage />} />
-          <Route path="/allscan"    element={<AllScanPage />} />
-        </Routes>
-      </div>
+      <div className="scrim" onClick={() => setNavOpen(false)} />
+
+      <main className="main-content">
+        <div className="app-content">
+          <Routes>
+            <Route path="/"           element={<Home />} />
+            <Route path="/dmr"        element={<DMRPage />} />
+            <Route path="/trunk"      element={<TrunkPage />} />
+            <Route path="/adsb"       element={<ADSBPage />} />
+            <Route path="/aprs"       element={<APRSPage />} />
+            <Route path="/ax25"       element={<AX25Page />} />
+            <Route path="/radio"      element={<RadioPage />} />
+            <Route path="/meshtastic" element={<MeshtasticPage />} />
+            <Route path="/scanner"    element={<ScannerPage />} />
+            <Route path="/sstv"       element={<SSTVPage />} />
+            <Route path="/meteor"     element={<MeteorPage />} />
+            <Route path="/subghz"     element={<SubGHzPage />} />
+            <Route path="/ble"        element={<BLEPage />} />
+            <Route path="/pager"      element={<PagerPage />} />
+            <Route path="/websdr"     element={<WebSDRPage />} />
+            <Route path="/satellite"  element={<SatellitePage />} />
+            <Route path="/hamclock"   element={<HamClockPage />} />
+            <Route path="/allscan"    element={<AllScanPage />} />
+          </Routes>
+        </div>
+      </main>
     </div>
   )
 }

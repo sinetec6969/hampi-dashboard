@@ -1,10 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  Mic, Network, Plane, Radar, MapPin, SquareTerminal, Image, CloudSun, Antenna,
+  MessageSquareText, AudioWaveform, Waypoints, Satellite, Bluetooth, Radio, Sun, Moon, Server,
+  ChevronRight,
+} from 'lucide-react'
 import { wsUrl } from '../ws'
-import { useMode, SDR_MODES, type SdrMode } from '../mode'
+import { useMode, type SdrMode } from '../mode'
 import Waterfall from '../components/Waterfall'
 import SignalMeters from '../components/SignalMeters'
 import AudioPlayer from '../components/AudioPlayer'
+import MemoryChannels from '../components/MemoryChannels'
+import SdrControl from '../components/SdrControl'
+import { Panel, StatusBadge, StatusDot, Metric, EmptyState, type Tone } from '../components/ui'
 
 interface SysInfo {
   hostname: string
@@ -13,19 +21,13 @@ interface SysInfo {
   version: string
 }
 
-const MEM_KEY = 'hampi-memory-channels'
-
-interface MemChannel { id: string; name: string; freq: number; gain: number }
-
-function loadMem(): MemChannel[] {
-  try { return JSON.parse(localStorage.getItem(MEM_KEY) || '[]') } catch { return [] }
-}
-
 function pad(n: number) { return n.toString().padStart(2, '0') }
-function fmtClock(d: Date) { return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` }
 function fmtHM(ms: number) { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}` }
 function fmtDur(ms: number) { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${pad(s % 60)}` }
-function fmtFreq(hz: number) { return Math.round(hz).toLocaleString('de-DE') }
+function fmtMHz(hz: number) {
+  const [i, f] = (hz / 1e6).toFixed(6).split('.')
+  return `${i}.${f.slice(0, 3)} ${f.slice(3)}`
+}
 
 // ── DMR feed ────────────────────────────────────────────────────────────────
 interface DMRFrame {
@@ -33,13 +35,13 @@ interface DMRFrame {
   tg_name?: string; alias: string
 }
 interface ActiveCall { id: number; tg: number; tgName: string; callsign: string; startMs: number }
-interface HistRow { t: string; tg: string; call: string; dur: string }
+interface HistRow { t: string; tg: number; tgName: string; call: string; dur: string }
 
 function useDmrFeed() {
   const [active, setActive] = useState<ActiveCall | null>(null)
   const [history, setHistory] = useState<HistRow[]>([])
   const activeRef = useRef<ActiveCall | null>(null)
-  activeRef.current = active
+  useEffect(() => { activeRef.current = active }, [active])
 
   useEffect(() => {
     let alive = true
@@ -48,8 +50,7 @@ function useDmrFeed() {
 
     function finalize(c: ActiveCall) {
       setHistory(h => [{
-        t: fmtHM(c.startMs),
-        tg: `TG ${c.tg}${c.tgName ? ' ' + c.tgName : ''}`,
+        t: fmtHM(c.startMs), tg: c.tg, tgName: c.tgName,
         call: c.callsign || String(c.id),
         dur: fmtDur(Date.now() - c.startMs),
       }, ...h].slice(0, 8))
@@ -102,7 +103,7 @@ function useDmrFeed() {
   return { active, history }
 }
 
-// ── Meshtastic feed ───────────────────────────────────────────────────────────
+// ── Meshtastic feed ─────────────────────────────────────────────────────────
 interface MeshMsg { id: string; timestamp: number; from_short: string; from_long: string; text: string }
 
 function useMeshFeed() {
@@ -165,46 +166,63 @@ function useHamClock() {
   return data
 }
 
-const COND_COLOR: Record<string, string> = { Good: '#00ff88', Fair: '#ffb000', Poor: '#ff3355' }
-
-// ── mode cards ────────────────────────────────────────────────────────────────
-interface CardDef { name: string; path: string; sub: string; sdr?: SdrMode; shared?: boolean; independent?: boolean }
-const CARDS: CardDef[] = [
-  { name: 'DMR VOICE', path: '/dmr',        sub: '438.800 MHz NFM · dsd-fme',    sdr: 'dmr' },
-  { name: 'TRUNK',     path: '/trunk',      sub: 'Connect Plus · SDRTrunk',      sdr: 'trunk' },
-  { name: 'ADS-B',     path: '/adsb',       sub: '1090 MHz · rtl_adsb',          sdr: 'adsb' },
-  { name: 'SCANNER',   path: '/scanner',    sub: 'AM/FM · VHF/UHF favourites',   sdr: 'scanner' },
-  { name: 'APRS',      path: '/aprs',       sub: '144.390 MHz · direwolf',       sdr: 'aprs' },
-  { name: 'AX.25',     path: '/ax25',       sub: 'direwolf KISS :8001',          sdr: 'aprs', shared: true },
-  { name: 'SSTV',      path: '/sstv',       sub: '145.800 MHz FM',               sdr: 'sstv' },
-  { name: 'METEOR',    path: '/meteor',     sub: '137.9 MHz QPSK · SatDump',     sdr: 'meteor' },
-  { name: 'SUB-GHZ',   path: '/subghz',     sub: '433.92 / 315 MHz · rtl_433',   sdr: 'subghz' },
-  { name: 'PAGER',     path: '/pager',      sub: 'POCSAG · FLEX · multimon-ng',  sdr: 'pager' },
-  { name: 'WEBSDR',    path: '/websdr',     sub: 'zoom · SSB/CW/AM/FM · tags',   sdr: 'websdr' },
-  { name: 'MESHTASTIC', path: '/meshtastic', sub: 'LoRa mesh · USB serial',      independent: true },
-  { name: 'SATELLITE', path: '/satellite',  sub: 'TinyGS · Mosquitto',           independent: true },
-  { name: 'BLE',       path: '/ble',        sub: '2.4 GHz · built-in radio',     independent: true },
-]
-
-const GREEN = '#00ff88', AMBER = '#ffb000'
-
-// ── panel header (┌─ TITLE ─── meta) ──────────────────────────────────────────
-function PanelHead({ title, meta }: { title: string; meta?: React.ReactNode }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ fontSize: 10, letterSpacing: 2, color: '#4d7a62' }}>┌─ {title}</span>
-      <span style={{ flex: 1, borderTop: '1px solid #123322' }} />
-      {meta}
-    </div>
-  )
+// ── independent devices + per-mode live stats for the mode cards ─────────────
+interface SideStatus {
+  ble?: { running: boolean; devices: number; trackers: number }
+  sat?: { mqtt_connected: boolean; packet_count: number }
+  adsb?: { aircraft_count: number }
 }
+
+function useSideStatus(actualMode: SdrMode | null) {
+  const [s, setS] = useState<SideStatus>({})
+  useEffect(() => {
+    let alive = true
+    const get = (url: string) => fetch(url).then(r => r.ok ? r.json() : undefined).catch(() => undefined)
+    const load = async () => {
+      const [ble, sat, adsb] = await Promise.all([
+        get('/api/ble/status'), get('/api/satellite/status'),
+        actualMode === 'adsb' ? get('/api/adsb/status') : Promise.resolve(undefined),
+      ])
+      if (alive) setS({ ble, sat, adsb })
+    }
+    load()
+    const t = setInterval(load, 10_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [actualMode])
+  return s
+}
+
+const COND_TONE: Record<string, Tone> = { Good: 'green', Fair: 'amber', Poor: 'red' }
+
+// ── mode cards ──────────────────────────────────────────────────────────────
+interface CardDef {
+  name: string; path: string; desc: string; icon: ComponentType<{ size?: number }>
+  sdr?: SdrMode; shared?: boolean; independent?: 'mesh' | 'sat' | 'ble'
+}
+const CARDS: CardDef[] = [
+  { name: 'DMR',        path: '/dmr',        desc: '438.800 MHz digital voice',     icon: Mic,               sdr: 'dmr' },
+  { name: 'WebSDR',     path: '/websdr',     desc: 'Zoomable receiver · SSB/CW/FM', icon: AudioWaveform,     sdr: 'websdr' },
+  { name: 'ADS-B',      path: '/adsb',       desc: '1090 MHz aircraft',             icon: Plane,             sdr: 'adsb' },
+  { name: 'Scanner',    path: '/scanner',    desc: 'AM/FM VHF/UHF favourites',      icon: Radar,             sdr: 'scanner' },
+  { name: 'Pager',      path: '/pager',      desc: 'POCSAG · FLEX',                 icon: MessageSquareText, sdr: 'pager' },
+  { name: 'Sub-GHz',    path: '/subghz',     desc: '433.92 / 315 MHz ISM · TPMS',   icon: Antenna,           sdr: 'subghz' },
+  { name: 'Trunk',      path: '/trunk',      desc: 'Connect Plus via SDRTrunk',     icon: Network,           sdr: 'trunk' },
+  { name: 'APRS',       path: '/aprs',       desc: '144.390 MHz packet',            icon: MapPin,            sdr: 'aprs' },
+  { name: 'AX.25',      path: '/ax25',       desc: 'KISS terminal (with APRS)',     icon: SquareTerminal,    sdr: 'aprs', shared: true },
+  { name: 'SSTV',       path: '/sstv',       desc: '145.800 MHz images',            icon: Image,             sdr: 'sstv' },
+  { name: 'METEOR',     path: '/meteor',     desc: '137.9 MHz LRPT weather',        icon: CloudSun,          sdr: 'meteor' },
+  { name: 'Meshtastic', path: '/meshtastic', desc: 'LoRa mesh · USB',               icon: Waypoints,         independent: 'mesh' },
+  { name: 'BLE',        path: '/ble',        desc: 'Built-in Bluetooth scan',       icon: Bluetooth,         independent: 'ble' },
+  { name: 'Satellite',  path: '/satellite',  desc: 'TinyGS via local MQTT',         icon: Satellite,         independent: 'sat' },
+]
 
 export default function Home() {
   const navigate = useNavigate()
-  const { actualMode, intendedMode, setIntendedMode, switching, switchErr, switchMode, caps } = useMode()
+  const { actualMode, caps } = useMode()
   const dmr = useDmrFeed()
   const mesh = useMeshFeed()
   const hc = useHamClock()
+  const side = useSideStatus(actualMode)
 
   const [info, setInfo] = useState<SysInfo | null>(null)
   const [freq, setFreq] = useState(438_800_000)
@@ -214,7 +232,6 @@ export default function Home() {
   const [sig, setSig] = useState(-100)
   const [snr, setSnr] = useState(0)
   const [now, setNow] = useState(() => Date.now())
-  const [mem, setMem] = useState<MemChannel[]>(loadMem)
 
   useEffect(() => {
     fetch('/api/sysinfo').then(r => r.json()).then(setInfo).catch(() => {})
@@ -233,6 +250,7 @@ export default function Home() {
 
   function tune(f: number, g?: number) {
     setFreq(f)
+    if (g != null) setGain(g)
     const q = g != null ? `freq=${Math.round(f)}&gain=${g}` : `freq=${Math.round(f)}`
     fetch(`/api/tune?${q}`, { method: 'POST' }).catch(() => {})
   }
@@ -245,322 +263,217 @@ export default function Home() {
     tune(v < 10_000 ? v * 1e6 : v)   // "438.8" means MHz, big numbers are Hz
   }
 
-  function saveMem() {
-    const name = prompt('Channel name:')
-    if (!name?.trim()) return
-    const next = [...mem, { id: crypto.randomUUID(), name: name.trim().toUpperCase(), freq, gain }]
-    setMem(next); localStorage.setItem(MEM_KEY, JSON.stringify(next))
+  function cardStatus(c: CardDef): { tone: Tone; label: string; stat: string } {
+    const cap = c.sdr ? caps[c.sdr] : undefined
+    if (cap?.ok === false) return { tone: 'gray', label: 'Not installed', stat: cap.hint }
+    if (c.independent === 'mesh')
+      return mesh.nodeCount != null ? { tone: 'green', label: 'Online', stat: `${mesh.nodeCount} nodes` }
+                                    : { tone: 'amber', label: 'Connecting', stat: 'Waiting for the radio' }
+    if (c.independent === 'ble') {
+      const b = side.ble
+      if (!b) return { tone: 'gray', label: 'Unknown', stat: '—' }
+      return b.running ? { tone: 'green', label: 'Scanning', stat: `${b.devices} devices · ${b.trackers} trackers` }
+                       : { tone: 'red', label: 'Stopped', stat: 'Bluetooth blocked or off' }
+    }
+    if (c.independent === 'sat') {
+      const s = side.sat
+      if (!s) return { tone: 'gray', label: 'Unknown', stat: '—' }
+      return s.mqtt_connected ? { tone: 'green', label: 'MQTT up', stat: `${s.packet_count} packets` }
+                              : { tone: 'red', label: 'MQTT down', stat: 'Local broker unreachable' }
+    }
+    if (c.sdr && actualMode === c.sdr) {
+      let stat = 'Receiving on SDR 0'
+      if (c.sdr === 'dmr' && dmr.active) stat = `TG ${dmr.active.tg} · ${dmr.active.callsign || dmr.active.id}`
+      if (c.sdr === 'adsb' && side.adsb) stat = `${side.adsb.aircraft_count} aircraft`
+      if (c.shared) stat = 'Shares the APRS decoder'
+      return { tone: 'green', label: 'Active', stat }
+    }
+    return { tone: 'gray', label: 'Idle', stat: 'Needs SDR 0' }
   }
 
-  const match = actualMode !== null && actualMode === intendedMode
-  const actualLabel = actualMode ? SDR_MODES.find(m => m.mode === actualMode)?.label ?? actualMode : '—'
-  const intendedLabel = SDR_MODES.find(m => m.mode === intendedMode)?.label ?? intendedMode
+  const bands = hc ? Array.from(new Set(hc.bands.map(b => b.name))) : []
 
   return (
-    <div className="rx-home" style={{ position: 'relative', background: '#030604' }}>
-      <div className="rx-grid" style={{ display: 'grid', gridTemplateColumns: '460px 1fr', height: '100%' }}>
-
-        {/* ── LEFT: spectrum ─────────────────────────────────────────── */}
-        <div className="rx-left" style={{ borderRight: '1px solid #123322', display: 'flex', flexDirection: 'column', background: '#000', minHeight: 0 }}>
-          <div style={{ padding: '10px 14px', borderBottom: '1px solid #123322', background: '#050a07' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 10, letterSpacing: 2, color: '#4d7a62' }}>SPECTRUM · DEV0</span>
-              <span style={{ flex: 1 }} />
-              <span style={{ fontSize: 10, color: '#3d6b52' }}>2.4 MHZ FFT · GAIN</span>
-              <input type="range" min={0} max={50} step={0.1} value={gain}
-                onChange={e => setGain(Number(e.target.value))}
-                onPointerUp={e => tune(freq, Number((e.target as HTMLInputElement).value))}
-                onKeyUp={e => tune(freq, Number((e.target as HTMLInputElement).value))}
-                style={{ width: 70 }} title="RF gain — release to apply" />
-              <span style={{ fontFamily: "'VT323', monospace", fontSize: 15, color: '#7dffb8', width: 34, textAlign: 'right' }}>{gain.toFixed(1)}</span>
+    <div className="dash">
+      {/* ── primary workspace ─────────────────────────────────────────────── */}
+      <div className="dash-main">
+        <Panel className="tuner">
+          <div className="tuner-top">
+            <div className="tuner-freq">
+              <span className="metric-label">Frequency · SDR 0</span>
+              {freqEdit !== null ? (
+                <input autoFocus className="tuner-input mono" value={freqEdit}
+                  onChange={e => setFreqEdit(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') commitFreqEdit(); if (e.key === 'Escape') setFreqEdit(null) }}
+                  onBlur={() => setFreqEdit(null)}
+                  placeholder="MHz (438.8) or Hz" aria-label="Frequency" />
+              ) : (
+                <button className="tuner-readout mono" onClick={() => setFreqEdit((freq / 1e6).toString())}
+                  title="Click to type a frequency — MHz or Hz, Enter to tune">
+                  {fmtMHz(freq)}<span className="tuner-unit">MHz</span>
+                </button>
+              )}
             </div>
-            {freqEdit !== null ? (
-              <input autoFocus value={freqEdit}
-                onChange={e => setFreqEdit(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') commitFreqEdit(); if (e.key === 'Escape') setFreqEdit(null) }}
-                onBlur={() => setFreqEdit(null)}
-                placeholder="MHz or Hz"
-                style={{
-                  fontFamily: "'VT323', monospace", fontSize: 38, color: '#00ff88', width: '100%',
-                  background: 'transparent', border: 'none', borderBottom: '1px solid #00ff88',
-                  outline: 'none', padding: 0, textShadow: '0 0 12px rgba(0,255,136,.6)',
-                }} />
-            ) : (
-              <div onClick={() => setFreqEdit((freq / 1e6).toString())} title="click to type a frequency — MHz (438.8) or Hz, Enter tunes"
-                style={{ fontFamily: "'VT323', monospace", fontSize: 38, color: '#00ff88', textShadow: '0 0 12px rgba(0,255,136,.6)', cursor: 'text' }}>
-                {fmtFreq(freq)}<span style={{ fontSize: 19, color: '#4d7a62' }}> HZ</span>
+            <div className="tuner-gain">
+              <label className="metric-label" htmlFor="rf-gain">RF gain</label>
+              <div className="tuner-gain-row">
+                <input id="rf-gain" type="range" min={0} max={50} step={0.1} value={gain}
+                  onChange={e => setGain(Number(e.target.value))}
+                  onPointerUp={e => tune(freq, Number((e.target as HTMLInputElement).value))}
+                  onKeyUp={e => tune(freq, Number((e.target as HTMLInputElement).value))}
+                  title="Release to apply" />
+                <span className="mono tuner-gain-val">{gain.toFixed(1)} dB</span>
               </div>
-            )}
+            </div>
+            <SignalMeters sig={sig} snr={snr} />
           </div>
+          <MemoryChannels currentFreq={freq} currentGain={gain} onRecall={(f, g) => tune(f, g)} />
+        </Panel>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#050a07', borderBottom: '1px solid #0d2418', overflowX: 'auto' }}>
-            <span style={{ fontSize: 9, letterSpacing: 2, color: '#3d6b52', flexShrink: 0 }}>MEM</span>
-            {mem.map(ch => (
-              <span key={ch.id} className="rx-mem-chip" onClick={() => tune(ch.freq, ch.gain)}
-                style={{ fontSize: 10, border: '1px solid #1d4030', padding: '2px 7px', color: '#7dffb8', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                {ch.name} {(ch.freq / 1e6).toFixed(4)}
-                <span className="rx-mem-del" onClick={e => {
-                  e.stopPropagation()
-                  const next = mem.filter(c => c.id !== ch.id)
-                  setMem(next); localStorage.setItem(MEM_KEY, JSON.stringify(next))
-                }} title="delete channel" style={{ marginLeft: 5, color: '#3d6b52' }}>×</span>
-              </span>
-            ))}
-            <span className="rx-save-chip" onClick={saveMem}
-              style={{ fontSize: 10, border: '1px dotted #1d4030', padding: '2px 7px', color: '#3d6b52', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>+ SAVE</span>
-          </div>
-
-          <SignalMeters sig={sig} snr={snr} />
-
-          <div className="rx-wf" style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+        <Panel className="spectrum" title="Spectrum" sub="2.4 MHz span · click to tune" flush>
+          <div className="spectrum-bezel">
             <Waterfall
               centerFreqHz={freq}
               palette="green"
               onClickTune={tune}
               onStats={(s, n) => { setSig(s); setSnr(n) }}
             />
-            <div style={{ position: 'absolute', bottom: 22, left: 12, fontSize: 9, letterSpacing: 1, color: '#3d6b52', pointerEvents: 'none' }}>CLICK-TO-TUNE</div>
           </div>
+        </Panel>
 
-          {/* active DMR caller — bottom half */}
-          <div style={{ flex: 1, minHeight: 0, borderTop: '1px solid #123322', background: '#040805', display: 'flex', flexDirection: 'column', padding: '10px 14px', gap: 10, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 10, letterSpacing: 2, color: '#4d7a62' }}>┌─ ACTIVE CALLER · DMR</span>
-              <span style={{ flex: 1, borderTop: '1px solid #123322' }} />
-              {dmr.active
-                ? <span className="rx-blink" style={{ fontSize: 10, letterSpacing: 1, color: '#00ff88' }}>▶ RX</span>
-                : <span style={{ fontSize: 10, letterSpacing: 1, color: '#3d6b52' }}>STANDBY</span>}
-            </div>
-
-            {dmr.active ? (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, minHeight: 0 }}>
-                <div style={{ fontSize: 11, letterSpacing: 2, color: '#4d7a62' }}>TALKGROUP</div>
-                <div style={{ fontFamily: "'VT323', monospace", fontSize: 44, lineHeight: 1, color: '#00ff88', textShadow: '0 0 14px rgba(0,255,136,.5)' }}>
-                  TG {dmr.active.tg}
-                </div>
-                {dmr.active.tgName && (
-                  <div style={{ fontSize: 15, color: '#c8ffe0' }}>{dmr.active.tgName}</div>
-                )}
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 6 }}>
-                  <span style={{ fontSize: 11, letterSpacing: 2, color: '#4d7a62' }}>CALLER</span>
-                  <span style={{ fontFamily: "'VT323', monospace", fontSize: 26, color: '#7dffb8' }}>{dmr.active.callsign || dmr.active.id}</span>
-                  <span style={{ fontFamily: "'VT323', monospace", fontSize: 26, color: '#00ff88', marginLeft: 'auto' }}>{fmtDur(now - dmr.active.startMs)}</span>
-                </div>
-                <div style={{ fontSize: 10, color: '#3d6b52' }}>RADIO ID {dmr.active.id}</div>
-              </div>
-            ) : (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3d6b52', fontSize: 12 }}>
-                {actualMode === 'dmr' ? 'no active caller — channel idle' : 'dev0 not in DMR mode'}
-              </div>
-            )}
-
-            <div style={{ flexShrink: 0 }}>
-              <AudioPlayer wsPath="/ws/dmr-audio" inputRate={8000} label="DMR AUDIO" />
-            </div>
+        <Panel title="Modes" sub="Open a mode for its full controls" className="modes-panel">
+          <div className="mode-cards">
+            {CARDS.map(c => {
+              const st = cardStatus(c)
+              const Icon = c.icon
+              return (
+                <button key={c.path} className={`mode-card2${st.tone === 'green' ? ' live' : ''}`} onClick={() => navigate(c.path)}>
+                  <div className="mc-top">
+                    <span className="mc-icon"><Icon size={16} /></span>
+                    <span className="mc-name">{c.name}</span>
+                    <ChevronRight size={14} className="mc-go" />
+                  </div>
+                  <div className="mc-desc">{c.desc}</div>
+                  <div className="mc-foot">
+                    <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
+                    <span className="mc-stat" title={st.stat}>{st.stat}</span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
-        </div>
+        </Panel>
+      </div>
 
-        {/* ── RIGHT ──────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {/* ── status workspace ──────────────────────────────────────────────── */}
+      <aside className="dash-side">
+        <SdrControl />
 
-          {/* header bar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', borderBottom: '1px solid #123322', background: '#050a07' }}>
-            <span onClick={() => navigate('/')} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 2, color: '#00ff88', textShadow: '0 0 10px rgba(0,255,136,.5)', cursor: 'pointer' }}>▚ HAMPI://RX</span>
-            <span style={{ fontSize: 10, color: '#3d6b52' }}>v{info?.version ?? '0.9-b3t8'}</span>
-            <span style={{ fontFamily: "'VT323', monospace", fontSize: 24, color: '#7dffb8', marginLeft: 'auto', textShadow: '0 0 8px rgba(0,255,136,.4)' }}>
-              {fmtClock(new Date(now))}<span className="rx-blink">▌</span>
-            </span>
-            {match ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #1d4030', padding: '5px 10px', background: '#07120c' }}>
-                <span style={{ fontSize: 10, letterSpacing: 2, color: '#00ff88' }}>MODE LOCK · {actualLabel}</span>
-                <span style={{ width: 14, height: 14, borderRadius: '50%', background: '#00ff88', boxShadow: '0 0 16px #00ff88' }} />
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #5a1622', padding: '5px 10px', background: '#160709' }}>
-                <span style={{ fontSize: 10, letterSpacing: 2, color: '#ff3355' }}>MISMATCH · DEV0={actualLabel} INTENT={intendedLabel}</span>
-                <span className="rx-blink-fast" style={{ width: 14, height: 14, borderRadius: '50%', background: '#ff3355', boxShadow: '0 0 16px #ff3355' }} />
-              </div>
-            )}
-          </div>
-
-          {/* DEV0 / INTENT switcher */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 16px', borderBottom: '1px solid #0d2418', background: '#040805' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 10, letterSpacing: 2, color: '#3d6b52', width: 52 }}>DEV0</span>
-              {SDR_MODES.map(({ mode, label }) => {
-                const on = actualMode === mode
-                const pending = switching === mode
-                const cap = caps[mode]
-                const absent = cap?.ok === false
-                return (
-                  <button key={mode} onClick={() => switchMode(mode)} disabled={switching !== null || absent}
-                    title={absent ? `missing ${cap.missing.join(', ')} — ${cap.hint}` : undefined}
-                    style={{
-                      fontFamily: 'inherit', fontSize: 11, letterSpacing: 1, padding: '4px 14px',
-                      cursor: switching || absent ? 'default' : 'pointer',
-                      border: `1px solid ${on ? '#00ff88' : '#1d4030'}`,
-                      background: on ? '#00ff88' : 'transparent',
-                      color: on ? '#04170c' : absent ? '#2c4d3a' : '#58a67a',
-                      textDecoration: absent ? 'line-through' : undefined,
-                      opacity: pending ? 0.6 : 1,
-                    }}>{pending ? `${label}…` : label}</button>
-                )
-              })}
-              <span style={{ fontSize: 9, color: '#2c4d3a', marginLeft: 'auto' }}>one owner at a time · failed switch rolls back to DMR</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 10, letterSpacing: 2, color: '#3d6b52', width: 52 }}>INTENT</span>
-              {SDR_MODES.map(({ mode, label }) => {
-                const on = intendedMode === mode
-                return (
-                  <button key={mode} onClick={() => setIntendedMode(mode)}
-                    style={{
-                      fontFamily: 'inherit', fontSize: 11, letterSpacing: 1, padding: '4px 14px', cursor: 'pointer',
-                      border: `1px dashed ${on ? '#00ff88' : '#16301f'}`,
-                      background: on ? '#123726' : 'transparent',
-                      color: on ? '#7dffb8' : '#3d6b52',
-                    }}>{label}</button>
-                )
-              })}
-            </div>
-            {switching && (
-              <div style={{ fontSize: 9, letterSpacing: 1, color: '#ffb000' }}>
-                stopping {actualLabel} · starting {SDR_MODES.find(m => m.mode === switching)?.label} — a failed start rolls back to DMR
-              </div>
-            )}
-            {switchErr && <div style={{ fontSize: 9, color: '#ff3355' }}>{switchErr}</div>}
-          </div>
-
-          {/* feeds row */}
-          <div className="rx-feeds" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: '#0d2418', borderBottom: '1px solid #0d2418' }}>
-            {/* DMR VOICE */}
-            <div style={{ background: '#040805', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-              <PanelHead title="DMR VOICE" meta={
-                <span className="rx-pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#00ff88', boxShadow: '0 0 6px #00ff88' }} />
-              } />
-              {dmr.active && (
-                <div style={{ border: '1px solid #1d4030', background: '#07160e', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span className="rx-blink" style={{ color: '#00ff88', fontWeight: 700 }}>▶RX</span>
-                  <span style={{ fontSize: 12, color: '#c8ffe0', fontWeight: 600 }}>TG {dmr.active.tg}{dmr.active.tgName ? ` ${dmr.active.tgName}` : ''}</span>
-                  <span style={{ fontSize: 11, color: '#7fbf9a' }}>{dmr.active.callsign || dmr.active.id}</span>
-                  <span style={{ fontFamily: "'VT323', monospace", fontSize: 19, color: '#00ff88', marginLeft: 'auto' }}>{fmtDur(now - dmr.active.startMs)}</span>
+        <Panel title="DMR" icon={<Mic />} bordered className={`dmr-panel${dmr.active ? ' call-live' : ''}`}
+          actions={dmr.active ? <StatusBadge tone="green" pulse>Receiving</StatusBadge>
+            : actualMode === 'dmr' ? <StatusBadge tone="gray">Idle</StatusBadge>
+            : <StatusBadge tone="gray">Not on SDR 0</StatusBadge>}>
+          {dmr.active ? (
+            <div className="call">
+              <div className="call-main">
+                <div>
+                  <div className="metric-label">Active call</div>
+                  <div className="call-tg mono">TG {dmr.active.tg}</div>
+                  {dmr.active.tgName && <div className="call-tgname">{dmr.active.tgName}</div>}
                 </div>
-              )}
-              {dmr.history.length === 0 && !dmr.active && (
-                <div style={{ fontSize: 10, color: '#3d6b52', padding: '4px 2px' }}>no calls yet — dev0 must be in DMR</div>
-              )}
-              {dmr.history.map((d, i) => (
-                <div key={i} style={{ display: 'flex', gap: 10, fontSize: 11, padding: '3px 2px', borderBottom: '1px dotted #0d2418' }}>
-                  <span style={{ color: '#3d6b52' }}>{d.t}</span>
-                  <span style={{ color: '#a8e8c4', width: 130 }}>{d.tg}</span>
-                  <span style={{ color: '#6aa886', flex: 1 }}>{d.call}</span>
-                  <span style={{ color: '#4d7a62' }}>{d.dur}</span>
-                </div>
-              ))}
+                <div className="call-dur mono">{fmtDur(now - dmr.active.startMs)}</div>
+              </div>
+              <div className="call-caller">
+                <span className="call-callsign mono">{dmr.active.callsign || dmr.active.id}</span>
+                <span className="muted mono">Radio ID {dmr.active.id}</span>
+              </div>
             </div>
-            {/* MESHTASTIC */}
-            <div style={{ background: '#040805', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-              <PanelHead title="MESHTASTIC" meta={
-                <span style={{ fontSize: 10, color: '#7fbf9a' }}>{mesh.nodeCount != null ? `${mesh.nodeCount} NODES` : 'CONNECTING'}</span>
-              } />
-              {mesh.messages.length === 0 && (
-                <div style={{ fontSize: 10, color: '#3d6b52', padding: '4px 2px' }}>no messages yet</div>
-              )}
+          ) : (
+            <EmptyState icon={<Radio />} title={actualMode === 'dmr' ? 'Channel idle' : 'SDR 0 is not in DMR mode'}>
+              {actualMode === 'dmr' ? 'Calls appear here the moment a voice frame decodes.' : 'Switch device 0 to DMR to monitor calls.'}
+            </EmptyState>
+          )}
+          {dmr.history.length > 0 && (
+            <table className="data-table call-hist">
+              <thead><tr><th>Time</th><th>Talkgroup</th><th>Caller</th><th className="r">Dur</th></tr></thead>
+              <tbody>
+                {dmr.history.map((d, i) => (
+                  <tr key={i}>
+                    <td className="mono">{d.t}</td>
+                    <td className="primary">TG {d.tg}{d.tgName && <span className="muted"> · {d.tgName}</span>}</td>
+                    <td className="mono">{d.call}</td>
+                    <td className="mono r">{d.dur}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="dash-audio">
+            <AudioPlayer wsPath="/ws/dmr-audio" inputRate={8000} label="DMR audio" />
+          </div>
+        </Panel>
+
+        <Panel title="Meshtastic" icon={<Waypoints />} bordered onClick={() => navigate('/meshtastic')}
+          actions={mesh.nodeCount != null ? <StatusBadge tone="green">{mesh.nodeCount} nodes</StatusBadge>
+                                          : <StatusBadge tone="amber">Connecting</StatusBadge>}>
+          {mesh.messages.length === 0 ? (
+            <EmptyState>No messages since this page opened.</EmptyState>
+          ) : (
+            <ul className="feed">
               {mesh.messages.map(m => (
-                <div key={m.id} style={{ fontSize: 11, padding: '4px 2px', borderBottom: '1px dotted #0d2418' }}>
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    <span style={{ color: '#3d6b52' }}>{fmtHM(m.timestamp * 1000)}</span>
-                    <span style={{ color: '#a8e8c4' }}>{m.from_short || m.from_long}</span>
-                  </div>
-                  <div style={{ color: '#6aa886', padding: '2px 0 0 60px' }}>{m.text}</div>
-                </div>
+                <li key={m.id}>
+                  <span className="feed-time mono">{fmtHM(m.timestamp * 1000)}</span>
+                  <span className="feed-from">{m.from_short || m.from_long}</span>
+                  <span className="feed-text">{m.text}</span>
+                </li>
               ))}
-            </div>
-            {/* HAMCLOCK */}
-            <div onClick={() => navigate('/hamclock')} style={{ background: '#040805', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 7, cursor: 'pointer' }}>
-              <PanelHead title="HAMCLOCK" meta={
-                <span style={{ fontFamily: "'VT323', monospace", fontSize: 17, color: '#7dffb8' }}>
-                  {new Date(now).toISOString().slice(11, 19)} UTC
-                </span>
-              } />
-              {hc ? (
-                <>
-                  <div style={{ display: 'flex', gap: 14, fontSize: 11, padding: '2px 2px' }}>
-                    <span style={{ color: '#3d6b52' }}>SFI <b style={{ color: '#c8ffe0' }}>{hc.sfi ?? '—'}</b></span>
-                    <span style={{ color: '#3d6b52' }}>A <b style={{ color: '#c8ffe0' }}>{hc.a ?? '—'}</b></span>
-                    <span style={{ color: '#3d6b52' }}>K <b style={{ color: '#c8ffe0' }}>{hc.k ?? '—'}</b></span>
-                    <span style={{ marginLeft: 'auto', color: '#7fbf9a' }}>{hc.callsign} · {hc.grid}</span>
-                  </div>
-                  {Array.from(new Set(hc.bands.map(b => b.name))).map(name => {
+            </ul>
+          )}
+        </Panel>
+
+        <Panel title="Propagation" icon={<Sun />} bordered onClick={() => navigate('/hamclock')}
+          actions={hc ? <span className="muted mono">{hc.callsign} · {hc.grid}</span> : <StatusBadge tone="gray">Offline</StatusBadge>}>
+          {hc ? (
+            <>
+              <div className="metric-grid hc-metrics">
+                <Metric label="Solar flux" value={hc.sfi ?? '—'} mono />
+                <Metric label="A index" value={hc.a ?? '—'} mono />
+                <Metric label="K index" value={hc.k ?? '—'} mono />
+              </div>
+              <table className="data-table">
+                <thead><tr><th>Band</th><th><Sun size={12} /> Day</th><th><Moon size={12} /> Night</th></tr></thead>
+                <tbody>
+                  {bands.map(name => {
                     const day   = hc.bands.find(b => b.name === name && b.time === 'day')
                     const night = hc.bands.find(b => b.name === name && b.time === 'night')
                     return (
-                      <div key={name} style={{ display: 'flex', gap: 10, fontSize: 11, padding: '3px 2px', borderBottom: '1px dotted #0d2418' }}>
-                        <span style={{ color: '#a8e8c4', width: 74 }}>{name}</span>
-                        <span style={{ color: COND_COLOR[day?.condition ?? ''] || '#3d6b52', flex: 1 }}>☀ {day?.condition ?? '—'}</span>
-                        <span style={{ color: COND_COLOR[night?.condition ?? ''] || '#3d6b52', flex: 1 }}>☾ {night?.condition ?? '—'}</span>
-                      </div>
+                      <tr key={name}>
+                        <td className="primary">{name}</td>
+                        {[day, night].map((b, i) => (
+                          <td key={i}><span className="cond"><StatusDot tone={COND_TONE[b?.condition ?? ''] ?? 'gray'} />{b?.condition ?? '—'}</span></td>
+                        ))}
+                      </tr>
                     )
                   })}
-                </>
-              ) : (
-                <div style={{ fontSize: 10, color: '#3d6b52', padding: '4px 2px' }}>no data — openhamclock service offline</div>
-              )}
-            </div>
-          </div>
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <EmptyState>OpenHamClock service is not answering.</EmptyState>
+          )}
+        </Panel>
 
-          {/* ALL MODES grid */}
-          <div style={{ padding: '12px 16px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
-            <div style={{ marginBottom: 10 }}><PanelHead title="ALL MODES" /></div>
-            <div className="rx-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
-              {CARDS.map(c => {
-                let led = AMBER, badge = 'IDLE', stat = '— dev0 not in mode'
-                const cap = c.sdr ? caps[c.sdr] : undefined
-                if (cap?.ok === false) {
-                  led = '#2c4d3a'
-                  badge = 'NOT INSTALLED'
-                  stat = cap.hint
-                } else if (c.independent) {
-                  led = GREEN
-                  badge = 'LIVE'
-                  stat = c.name === 'MESHTASTIC'
-                    ? (mesh.nodeCount != null ? `${mesh.nodeCount} nodes · live` : 'connecting…')
-                    : c.name === 'BLE' ? 'scanning · no dongle' : 'TinyGS · MQTT online'
-                } else if (c.sdr && actualMode === c.sdr) {
-                  led = GREEN
-                  badge = c.shared ? 'LIVE' : '▶ DEV0'
-                  stat = c.name === 'DMR VOICE' && dmr.active
-                    ? `▶ TG ${dmr.active.tg} ${dmr.active.callsign || dmr.active.id}`
-                    : 'receiving on dev0'
-                }
-                return (
-                  <div key={c.path} className="rx-card" onClick={() => navigate(c.path)}
-                    style={{ border: '1px solid #123322', background: '#050c08', padding: '9px 11px', display: 'flex', flexDirection: 'column', gap: 4, cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: led, boxShadow: `0 0 6px ${led}` }} />
-                      <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: 1, color: '#c8ffe0' }}>{c.name}</span>
-                    </div>
-                    <div style={{ fontSize: 9, color: '#3d6b52' }}>{c.sub}</div>
-                    <div style={{ fontSize: 10, color: '#7fbf9a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stat}</div>
-                    <div style={{ fontSize: 9, letterSpacing: 1, color: led }}>{badge}</div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* sysinfo footer */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '7px 16px', borderTop: '1px solid #123322', background: '#050a07', fontSize: 10, color: '#4d7a62' }}>
-            <span>host <span style={{ color: '#7fbf9a' }}>{info?.hostname ?? 'hampi.local'}</span></span>
-            {info?.local_ip && <span>local <span style={{ color: '#7fbf9a' }}>{info.local_ip}:8000</span></span>}
-            {info?.tailscale_ip && <span>tailscale <span style={{ color: '#7fbf9a' }}>{info.tailscale_ip}:8000</span></span>}
-            <span title="connected browsers: waterfall / DMR metadata">clients <span style={{ color: '#7fbf9a' }}>wf:{clients.waterfall || 0} dmr:{clients.dmr || 0}</span></span>
-            <span style={{ marginLeft: 'auto' }}>
-              ver <span style={{ color: '#7fbf9a' }}>{info?.version ?? '0.9-b3t8'}</span> · <a href="https://github.com/sinetec6969/hampi-dashboard" target="_blank" rel="noreferrer" style={{ color: '#7fbf9a' }}>github</a>
-            </span>
-          </div>
-        </div>
-      </div>
+        <Panel title="System" icon={<Server />} bordered>
+          <dl className="kv">
+            <dt>Host</dt><dd className="mono">{info?.hostname ?? '—'}</dd>
+            {info?.local_ip && <><dt>LAN</dt><dd className="mono">{info.local_ip}:8000</dd></>}
+            {info?.tailscale_ip && <><dt>Tailscale</dt><dd className="mono">{info.tailscale_ip}</dd></>}
+            <dt>Viewers</dt><dd className="mono" title="connected browsers: waterfall / DMR metadata">waterfall {clients.waterfall || 0} · DMR {clients.dmr || 0}</dd>
+            <dt>Version</dt>
+            <dd className="mono">{info?.version ?? '—'} · <a href="https://github.com/sinetec6969/hampi-dashboard" target="_blank" rel="noreferrer">GitHub</a></dd>
+          </dl>
+        </Panel>
+      </aside>
     </div>
   )
 }

@@ -45,47 +45,47 @@ export default function SatPanel() {
   const sats = data.satellites
 
   return (
-    <div style={{ border: '1px solid #1d4030', background: '#0c0c0c', padding: 10, fontSize: 13 }}>
+    <div style={{ border: '1px solid #343c3d', background: '#0d1011', padding: 10, fontSize: 13 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-        <span style={{ color: '#ff8800', fontWeight: 600 }}>┌─ SSTV SATELLITES</span>
-        <span style={{ color: '#58a67a', fontSize: 11 }}>
+        <span style={{ color: '#e08a3c', fontWeight: 600 }}>SSTV SATELLITES</span>
+        <span style={{ color: '#9aa5a0', fontSize: 11 }}>
           QTH {data.qth.grid} · {data.qth.lat?.toFixed(2)},{data.qth.lon?.toFixed(2)}
           {!data.sstv_active && ' · (tracking auto-tunes in SSTV mode)'}
         </span>
       </div>
 
       {sats.length === 0 && (
-        <div style={{ color: '#7fbf9a', padding: 8 }}>No TLEs loaded — AMSAT unreachable?</div>
+        <div style={{ color: '#9aa5a0', padding: 8 }}>No TLEs loaded — AMSAT unreachable?</div>
       )}
 
       {sats.map(s => {
         const up = s.visible
         return (
-          <div key={s.norad} style={{ borderTop: '1px solid #1d1d1d', padding: '6px 0' }}>
+          <div key={s.norad} style={{ borderTop: '1px solid #252b2c', padding: '6px 0' }}>
             <div
               onClick={() => setOpen(open === s.norad ? null : s.norad)}
               style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 8, cursor: 'pointer', alignItems: 'center' }}
             >
-              <span style={{ color: s.tracked ? '#33ff66' : '#c8ffe0' }}>
+              <span style={{ color: s.tracked ? '#35d07f' : '#e7ece9' }}>
                 {s.tracked ? '▶ ' : ''}{s.name}
               </span>
-              <span style={{ color: up ? '#33ff66' : '#58a67a', minWidth: 64, textAlign: 'right' }}>
+              <span style={{ color: up ? '#35d07f' : '#9aa5a0', minWidth: 64, textAlign: 'right' }}>
                 {s.el != null ? `${up ? '↑' : '↓'}${s.el}°` : '—'}
               </span>
-              <span style={{ color: '#7fbf9a', minWidth: 96, textAlign: 'right', fontSize: 12 }}>
+              <span style={{ color: '#9aa5a0', minWidth: 96, textAlign: 'right', fontSize: 12 }}>
                 {up ? 'OVERHEAD' : (s.next_pass ? `in ${countdown(s.next_pass.aos_ts)}` : 'no pass 3d')}
               </span>
-              <span style={{ color: '#4d7a62', fontSize: 11 }}>{open === s.norad ? '▲' : '▼'}</span>
+              <span style={{ color: '#66716c', fontSize: 11 }}>{open === s.norad ? '▲' : '▼'}</span>
             </div>
 
             {open === s.norad && (
-              <div style={{ marginTop: 6, paddingLeft: 4, color: '#7fbf9a', fontSize: 12, lineHeight: 1.5 }}>
+              <div style={{ marginTop: 6, paddingLeft: 4, color: '#9aa5a0', fontSize: 12, lineHeight: 1.5 }}>
                 <div style={{ marginBottom: 4 }}>{s.desc}</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, color: '#7fbf9a' }}>
-                  <span>downlink <b style={{ color: '#a8e8c4' }}>{mhz(s.freq)}</b> MHz</span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, color: '#9aa5a0' }}>
+                  <span>downlink <b style={{ color: '#cfd6d2' }}>{mhz(s.freq)}</b> MHz</span>
                   <span>{s.mode}</span>
-                  {s.doppler_hz != null && <span>Doppler <b style={{ color: s.doppler_hz >= 0 ? '#33ff66' : '#ff8844' }}>{s.doppler_hz >= 0 ? '+' : ''}{s.doppler_hz}</b> Hz</span>}
-                  {s.rx_freq != null && <span>RX <b style={{ color: '#a8e8c4' }}>{mhz(s.rx_freq)}</b> MHz</span>}
+                  {s.doppler_hz != null && <span>Doppler <b style={{ color: s.doppler_hz >= 0 ? '#35d07f' : '#e08a3c' }}>{s.doppler_hz >= 0 ? '+' : ''}{s.doppler_hz}</b> Hz</span>}
+                  {s.rx_freq != null && <span>RX <b style={{ color: '#cfd6d2' }}>{mhz(s.rx_freq)}</b> MHz</span>}
                   {s.az != null && <span>az {s.az}°</span>}
                   {s.range_km != null && <span>{s.range_km} km</span>}
                 </div>

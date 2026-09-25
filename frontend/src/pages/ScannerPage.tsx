@@ -171,7 +171,7 @@ export default function ScannerPage() {
     <div className="scanner-page">
       {/* Header */}
       <div className="scanner-header">
-        <span className="scanner-title">┌─ SCANNER AM/FM</span>
+        <span className="scanner-title">Scanner AM/FM</span>
         <div className="scanner-header-right">
           {enabled ? (
             <>
@@ -194,7 +194,7 @@ export default function ScannerPage() {
         {/* Left — frequency list */}
         <div className="scanner-freqlist">
           <div className="panel-title">
-            Favourites <span style={{ color: '#4d7a62' }}>({channels.length})</span>
+            Favourites <span style={{ color: '#66716c' }}>({channels.length})</span>
           </div>
           {channels.length === 0 ? (
             <div className="scanner-no-channels">
@@ -240,7 +240,7 @@ export default function ScannerPage() {
               <div className="scanner-meter-fill" style={{ width: `${meterPct}%` }} />
               <div className="scanner-meter-thresh" style={{ left: `${Math.min(100, 33.3)}%` }} />
             </div>
-            <div style={{ fontSize: '0.7rem', color: '#4d7a62', marginTop: 4 }}>
+            <div style={{ fontSize: '0.7rem', color: '#66716c', marginTop: 4 }}>
               level {level.toFixed(4)} · opens above {curSq.toFixed(3)} (marker)
             </div>
           </div>
@@ -258,7 +258,7 @@ export default function ScannerPage() {
                      onChange={e => applySquelch(parseFloat(e.target.value), 'FM')} />
               <span className="scanner-slider-val">{sqFm.toFixed(3)}</span>
             </div>
-            <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#4d7a62' }}>
+            <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#66716c' }}>
               Two thresholds because the metrics differ: AM squelches on modulation
               depth, FM on carrier strength.
             </div>
@@ -277,7 +277,7 @@ export default function ScannerPage() {
                      onChange={e => applyHold(parseFloat(e.target.value))} />
               <span className="scanner-slider-val">{hold.toFixed(1)} s</span>
             </div>
-            <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#4d7a62' }}>
+            <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#66716c' }}>
               Dwell change applies at the next channel rotation.
             </div>
           </div>
@@ -317,7 +317,7 @@ export default function ScannerPage() {
               <div className={`scanner-ini-msg ${iniMsg.ok ? 'ok' : 'err'}`}>{iniMsg.text}</div>
             )}
 
-            <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#4d7a62', lineHeight: 1.6 }}>
+            <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#66716c', lineHeight: 1.6 }}>
               One <code>[Section]</code> per channel — the section name is the label.
               <code>freq</code> in MHz (or Hz), <code>mode</code> is AM or FM and is
               inferred from the band if you leave it out.

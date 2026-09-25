@@ -1,5 +1,7 @@
 import { wsUrl } from '../ws'
 import { useEffect, useRef, useState } from 'react'
+import { Volume2, Play, Square } from 'lucide-react'
+import { StatusDot } from './ui'
 
 type Status = 'stopped' | 'connecting' | 'streaming'
 type Mode   = 'worklet' | 'scheduled'
@@ -174,35 +176,26 @@ export default function AudioPlayer({ wsPath = '/ws/audio', inputRate = 8000, la
     }
   }, [auto])
 
-  const dot: Record<Status, string> = {
-    stopped: '#7fbf9a', connecting: '#ffaa00', streaming: '#00ff88',
-  }
+  const tone = status === 'streaming' ? 'green' : status === 'connecting' ? 'amber' : 'gray'
 
   return (
-    <div className="panel" style={{ flex: '1' }}>
-      <div className="panel-title">{label}</div>
-      <div style={{ marginTop: 8 }}>
-        <span style={{ color: dot[status], fontSize: '0.8rem', marginRight: 12 }}>
-          ● {status}
-        </span>
+    <div className="audio-ctl">
+      <div className="audio-row">
+        <Volume2 size={15} className="audio-icon" aria-hidden />
+        <span className="audio-label">{label}</span>
+        <span className="audio-status"><StatusDot tone={tone} pulse={status === 'connecting'} />{status}</span>
+        {!auto && (status === 'stopped'
+          ? <button className="btn btn-sm" onClick={start}><Play />Listen</button>
+          : <button className="btn btn-sm btn-danger" onClick={stop}><Square />Stop</button>)}
       </div>
-      {!auto && (
-        <div style={{ marginTop: 8 }}>
-          {status === 'stopped'
-            ? <button className="btn" onClick={start}>▶ Start</button>
-            : <button className="btn stop" onClick={stop}>■ Stop</button>}
-        </div>
-      )}
       {status === 'streaming' && (
-        <div className="status-line" style={{ marginTop: 8 }}>
+        <div className="audio-stats mono">
           {mode === 'worklet' ? 'AudioWorklet' : 'scheduled'}
           {mode === 'worklet' && stats &&
-            ` — buf ${stats.depth_ms}/${stats.target_ms}ms, underruns ${stats.underruns}`}
+            ` · buffer ${stats.depth_ms}/${stats.target_ms} ms · underruns ${stats.underruns}`}
         </div>
       )}
-      {err && (
-        <div className="status-line" style={{ color: '#ff3355', marginTop: 4 }}>{err}</div>
-      )}
+      {err && <div className="audio-err" role="alert">{err}</div>}
     </div>
   )
 }

@@ -35,7 +35,7 @@ export default function DMRPage() {
   return (
     <>
       <div className="header">
-        <span className="header-title">┌─ DMR VOICE</span>
+        <span className="header-title">DMR VOICE</span>
         <span className="header-freq">{(freq / 1e6).toFixed(4)} MHz</span>
         <Controls
           freq={freq} gain={gain}

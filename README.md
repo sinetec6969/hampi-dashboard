@@ -38,6 +38,8 @@ logged. Mesh nodes mapped. A WebSDR-style receiver you can zoom, tune and tag.
 **No cloud. No subscription. No API keys. Nothing leaves your network unless you
 flip a switch that says so.**
 
+![HamPi dashboard — SDR tuning strip, spectrum, device 0 control, live mode status](docs/dashboard.png)
+
 ### ⚡ New in r3b0rn
 
 Wiped the SD card, rebuilt the Pi from nothing on Debian 13 — and it came back with more ears.
@@ -68,6 +70,27 @@ Two ideas run through all of it:
   static TPMS IDs from passing cars, Find My / Tile / SmartTag trackers that
   separated from their owner, Ring-class devices announcing themselves. You can't
   defend against what you can't see.
+
+## The console
+
+The UI is built to read like test equipment, not a movie prop: a graphite dark
+theme, Inter for interface text, and monospace only where it earns it —
+frequencies, callsigns, IDs, timestamps, packet data. Green means one thing
+everywhere (connected / receiving / ready), amber means waiting or degraded, red
+means error or a TX warning, gray means idle or not installed — and every status
+carries text as well as colour.
+
+- **Dashboard** answers "what is the SDR doing?" at a glance: tuned frequency and
+  gain, signal/SNR meters, memory channels, the spectrum, and an **SDR device 0**
+  panel showing current vs. requested mode, with not-installed modes struck through
+  and switch failures shown, not buried. A live DMR call takes over its panel.
+- **Grouped sidebar** (monitoring · voice · packet · air & satellite · spectrum ·
+  tools) with a live marker on whichever mode owns the dongle; a top bar with
+  device-0 state, backend reachability and local/UTC time.
+- **Responsive for real use:** full sidebar on desktop, an icon rail on laptops and
+  the 1024×600 Pi touchscreen, a drawer on phones — radio controls stay at the top,
+  touch targets are 40 px. Respects `prefers-reduced-motion`.
+- Self-hosted fonts and icons — the UI loads nothing from the internet.
 
 ## What's live
 
@@ -350,6 +373,10 @@ Always on, own hardware:
 FastAPI on :8000 — one process, WS + REST per mode, static frontend + /tiles
 ```
 
+Frontend: React + TypeScript + Vite. Design tokens and primitives live in
+`frontend/src/index.css` and `components/ui.tsx` (`Panel`, `StatusBadge`,
+`StatusDot`, `Metric`, `EmptyState`, `Button`); page layout in `App.css`.
+
 Separate class per mode, each owning its subprocess or serial connection; all
 WebSocket and REST endpoints registered in `main.py`. New modes copy that pattern.
 
@@ -384,6 +411,14 @@ paging lives at 152–159 and 929–932 MHz. The WebSDR waterfall finds the carr
 **DMR caller map is empty** — geocoding is off by default for privacy. `geocode: enable: true` if you're fine with that.
 
 ## Version history
+
+### Unreleased — console redesign
+The frontend went from retro terminal to RF console: new design tokens, Inter +
+IBM Plex Mono, grouped sidebar navigation with icons, a top bar with device-0 and
+backend status, and a rebuilt dashboard (tuning strip, calibrated meters, SDR
+device 0 control with current vs. requested mode, promoted DMR active call, live
+status on every mode card). Scanlines, glow, blinking and ASCII headings are gone;
+every page moved to the shared palette. Responsive from 1920×1080 down to phones.
 
 ### 0.9-b3t8 · r3b0rn — 2026-09-24
 Rebuilt from scratch on a new SD card (Debian 13 trixie) and re-audited — every mode

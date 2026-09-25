@@ -5,9 +5,9 @@ export default function HamClockPage() {
   return (
     <>
       <div className="header">
-        <span className="header-title">┌─ HAMCLOCK</span>
+        <span className="header-title">HamClock</span>
         <a href={src} target="_blank" rel="noreferrer"
-           style={{ fontSize: 11, letterSpacing: 1, color: '#4d7a62', textDecoration: 'none' }}>
+           style={{ fontSize: 11, letterSpacing: 1, color: '#66716c', textDecoration: 'none' }}>
           OPEN DIRECT ↗
         </a>
       </div>

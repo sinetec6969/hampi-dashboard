@@ -102,8 +102,8 @@ export default function WebSDRPage() {
       const c = specRef.current; if (!c) return
       const g = c.getContext('2d')!; const W = c.width, H = c.height
       const { floorDb: lo, rangeDb: rg } = colorRef.current
-      g.fillStyle = '#020503'; g.fillRect(0, 0, W, H)
-      g.strokeStyle = '#0d2418'; g.lineWidth = 1; g.fillStyle = '#3d6b52'; g.font = '10px monospace'
+      g.fillStyle = '#080a0b'; g.fillRect(0, 0, W, H)
+      g.strokeStyle = '#252b2c'; g.lineWidth = 1; g.fillStyle = '#66716c'; g.font = '10px monospace'
       for (let db = Math.ceil(lo / 10) * 10; db <= lo + rg; db += 10) {
         const y = H - ((db - lo) / rg) * H
         g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); g.fillText(`${db}`, 2, y - 2)
@@ -113,7 +113,7 @@ export default function WebSDRPage() {
         const y = H - ((bins[i] - lo) / rg) * H
         if (i === 0) g.moveTo(0, y); else g.lineTo((i / bins.length) * W, y)
       }
-      g.strokeStyle = '#00ff88'; g.stroke()
+      g.strokeStyle = '#35d07f'; g.stroke()
     }
 
     function onFrame(buf: ArrayBuffer) {
@@ -288,19 +288,14 @@ export default function WebSDRPage() {
   const tickDigits = ts >= 1e6 ? 1 : ts >= 1e5 ? 2 : ts >= 1e4 ? 3 : ts >= 1e3 ? 4 : 5
   const pb = st?.rx_freq != null && st.mode && st.bw != null ? passband(st.rx_freq, st.mode, st.bw) : null
   const visibleTags = tags.filter(t => t.freq >= viewStart && t.freq <= viewStart + span)
-  const btn = (on: boolean) => ({
-    fontFamily: 'inherit', fontSize: 11, padding: '3px 9px', cursor: 'pointer',
-    border: `1px solid ${on ? '#00ff88' : '#1d4030'}`, background: on ? '#00ff88' : 'transparent',
-    color: on ? '#04170c' : '#58a67a',
-  })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: 10 }}>
       <div className="header">
-        <span className="header-title">┌─ WEBSDR</span>
+        <span className="header-title">WebSDR</span>
         <span className="header-freq">centre {fmtMHz(st?.center ?? 0, 4)} MHz · span {(span / 1e3).toFixed(span < 1e5 ? 1 : 0)} kHz</span>
         <span className={'badge ' + (active ? 'badge-green' : 'badge-red')}>{active ? '● Live' : '○ Idle'}</span>
-        {err && <span style={{ color: '#ff3355', fontSize: 11 }}>{err}</span>}
+        {err && <span style={{ color: '#e05858', fontSize: 11 }}>{err}</span>}
       </div>
 
       {!active && (
@@ -311,72 +306,72 @@ export default function WebSDRPage() {
       )}
 
       {/* controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 11, color: '#7fbf9a' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 11, color: '#9aa5a0' }}>
         {freqEdit !== null ? (
           <input autoFocus value={freqEdit} onChange={e => setFreqEdit(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { commitFreq(freqEdit, 'rx_freq'); setFreqEdit(null) } if (e.key === 'Escape') setFreqEdit(null) }}
             onBlur={() => setFreqEdit(null)}
-            style={{ fontFamily: 'VT323, monospace', fontSize: 30, width: 190, background: '#000', color: '#00ff88', border: '1px solid #00ff88' }} />
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 30, width: 190, background: '#000', color: '#35d07f', border: '1px solid #35d07f' }} />
         ) : (
           <span title="click to type a frequency (MHz)" onClick={() => active && setFreqEdit(fmtMHz(st?.rx_freq ?? 0))}
-            style={{ fontFamily: 'VT323, monospace', fontSize: 34, color: '#00ff88', cursor: 'text', textShadow: '0 0 8px #00ff8866', minWidth: 190 }}>
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 34, color: 'var(--text)', cursor: 'text', minWidth: 190 }}>
             {fmtMHz(st?.rx_freq ?? st?.center ?? 0)}
           </span>
         )}
         <span style={{ display: 'flex', gap: 3 }}>
           {(st?.modes ?? ['NFM', 'AM', 'WFM', 'USB', 'LSB', 'CW']).map(m =>
-            <button key={m} style={btn(st?.mode === m)} disabled={!active} onClick={() => post({ mode: m })}>{m}</button>)}
+            <button key={m} className={'seg-btn' + ((st?.mode === m) ? ' active' : '')} disabled={!active} onClick={() => post({ mode: m })}>{m}</button>)}
         </span>
-        <span>BW <span style={{ color: '#c8ffe0' }}>{st?.bw != null ? (st.bw >= 1000 ? `${(st.bw / 1000).toFixed(st.bw % 1000 ? 1 : 0)}k` : st.bw) : '—'}</span></span>
-        <span>STEP{' '}
+        <span>BW <span style={{ color: '#e7ece9' }}>{st?.bw != null ? (st.bw >= 1000 ? `${(st.bw / 1000).toFixed(st.bw % 1000 ? 1 : 0)}k` : st.bw) : '—'}</span></span>
+        <span>Step{' '}
           <select value={step} onChange={e => setStep(Number(e.target.value))}>
             {STEPS.map(s => <option key={s} value={s}>{s >= 1000 ? `${s / 1000}k` : s}</option>)}
           </select>
         </span>
         <span style={{ display: 'flex', gap: 3 }}>
-          <button style={btn(false)} disabled={!active} onClick={() => post({ span: span * 2 })}>−</button>
-          <button style={btn(false)} disabled={!active} onClick={() => post({ span: span / 2, view_center: st?.rx_freq })}>+</button>
-          <button style={btn(false)} disabled={!active} onClick={() => post({ span: st?.sample_rate ?? 2.4e6, view_center: st?.center })}>FULL</button>
+          <button className="seg-btn" disabled={!active} onClick={() => post({ span: span * 2 })}>−</button>
+          <button className="seg-btn" disabled={!active} onClick={() => post({ span: span / 2, view_center: st?.rx_freq })}>+</button>
+          <button className="seg-btn" disabled={!active} onClick={() => post({ span: st?.sample_rate ?? 2.4e6, view_center: st?.center })}>Full</button>
         </span>
-        <button style={btn(false)} disabled={!active || !st?.rx_freq} title="retune the dongle so the receiver sits mid-capture"
-          onClick={() => st?.rx_freq && post({ center: Math.round(st.rx_freq) })}>RECENTRE</button>
+        <button className="seg-btn" disabled={!active || !st?.rx_freq} title="retune the dongle so the receiver sits mid-capture"
+          onClick={() => st?.rx_freq && post({ center: Math.round(st.rx_freq) })}>Recentre</button>
         {centerEdit !== null ? (
           <input autoFocus value={centerEdit} onChange={e => setCenterEdit(e.target.value)} style={{ width: 90 }}
             onKeyDown={e => { if (e.key === 'Enter') { commitFreq(centerEdit, 'center'); setCenterEdit(null) } if (e.key === 'Escape') setCenterEdit(null) }}
             onBlur={() => setCenterEdit(null)} />
         ) : (
-          <button style={btn(false)} disabled={!active} onClick={() => setCenterEdit(fmtMHz(st?.center ?? 0, 4))}>CENTRE…</button>
+          <button className="seg-btn" disabled={!active} onClick={() => setCenterEdit(fmtMHz(st?.center ?? 0, 4))}>Centre…</button>
         )}
-        <span>GAIN <input type="range" min={0} max={49.6} step={0.1} value={st?.gain ?? 40} disabled={!active}
+        <span>Gain <input type="range" min={0} max={49.6} step={0.1} value={st?.gain ?? 40} disabled={!active}
           onChange={e => post({ gain: Number(e.target.value) }, true)} style={{ width: 80, verticalAlign: 'middle' }} /> {st?.gain?.toFixed(1)}</span>
-        <span>FLOOR <input type="range" min={-130} max={-40} value={floorDb} onChange={e => setFloorDb(Number(e.target.value))} style={{ width: 70, verticalAlign: 'middle' }} /></span>
-        <span>RANGE <input type="range" min={10} max={90} value={rangeDb} onChange={e => setRangeDb(Number(e.target.value))} style={{ width: 70, verticalAlign: 'middle' }} /></span>
-        <button style={btn(false)} onClick={autoContrast}>AUTO</button>
-        <button style={{ ...btn(false), borderColor: '#ffb000', color: '#ffb000' }} disabled={!active} onClick={addTag}>+ TAG</button>
+        <span>Floor <input type="range" min={-130} max={-40} value={floorDb} onChange={e => setFloorDb(Number(e.target.value))} style={{ width: 70, verticalAlign: 'middle' }} /></span>
+        <span>Range <input type="range" min={10} max={90} value={rangeDb} onChange={e => setRangeDb(Number(e.target.value))} style={{ width: 70, verticalAlign: 'middle' }} /></span>
+        <button className="seg-btn" onClick={autoContrast}>Auto</button>
+        <button className="btn btn-sm" disabled={!active} onClick={addTag}>+ Tag signal</button>
       </div>
 
       {/* scale: ticks, passband, tags */}
-      <div style={{ position: 'relative', height: 44, background: '#040805', border: '1px solid #123322', overflow: 'hidden', userSelect: 'none', flexShrink: 0 }}
+      <div style={{ position: 'relative', height: 44, background: '#0d1011', border: '1px solid #252b2c', overflow: 'hidden', userSelect: 'none', flexShrink: 0 }}
         onPointerMove={edgeMove} onPointerUp={edgeUp}>
         {ticks.map(f => (
-          <div key={f} style={{ position: 'absolute', left: `${pct(f)}%`, bottom: 0, height: 8, borderLeft: '1px solid #3d6b52' }}>
-            <span style={{ position: 'absolute', bottom: 8, left: 3, fontSize: 10, color: '#6aa886', whiteSpace: 'nowrap' }}>{fmtMHz(f, tickDigits)}</span>
+          <div key={f} style={{ position: 'absolute', left: `${pct(f)}%`, bottom: 0, height: 8, borderLeft: '1px solid #66716c' }}>
+            <span style={{ position: 'absolute', bottom: 8, left: 3, fontSize: 10, color: '#8a9590', whiteSpace: 'nowrap' }}>{fmtMHz(f, tickDigits)}</span>
           </div>
         ))}
         {pb && (
           <div style={{ position: 'absolute', left: `${pct(pb[0])}%`, width: `${Math.max(0.2, pct(pb[1]) - pct(pb[0]))}%`, top: 22, bottom: 0,
-                        background: '#00ff8833', borderLeft: '2px solid #00ff88', borderRight: '2px solid #00ff88' }}>
+                        background: '#35d07f33', borderLeft: '2px solid #35d07f', borderRight: '2px solid #35d07f' }}>
             <div onPointerDown={e => edgeDown(e, 'lo')} style={{ position: 'absolute', left: -6, top: 0, bottom: 0, width: 10, cursor: 'ew-resize' }} />
             <div onPointerDown={e => edgeDown(e, 'hi')} style={{ position: 'absolute', right: -6, top: 0, bottom: 0, width: 10, cursor: 'ew-resize' }} />
           </div>
         )}
-        {st?.rx_freq != null && <div style={{ position: 'absolute', left: `${pct(st.rx_freq)}%`, top: 18, bottom: 0, borderLeft: '1px solid #ff3355' }} />}
+        {st?.rx_freq != null && <div style={{ position: 'absolute', left: `${pct(st.rx_freq)}%`, top: 18, bottom: 0, borderLeft: '1px solid #e05858' }} />}
         {visibleTags.map(t => (
           <div key={t.id} title={`${t.label} · ${fmtMHz(t.freq)} ${t.mode} ${t.bw} Hz${t.notes ? ' · ' + t.notes : ''}`}
             style={{ position: 'absolute', left: `${pct(t.freq)}%`, top: 1, transform: 'translateX(-50%)', display: 'flex', alignItems: 'center',
-                     gap: 3, fontSize: 10, background: '#1a1300', border: '1px solid #ffb000', color: '#ffb000', padding: '0 4px', whiteSpace: 'nowrap', cursor: 'pointer', zIndex: 2 }}>
+                     gap: 3, fontSize: 10, background: '#2a2112', border: '1px solid #e5a93d', color: '#e5a93d', padding: '0 4px', whiteSpace: 'nowrap', cursor: 'pointer', zIndex: 2 }}>
             <span onClick={() => gotoTag(t)}>▼ {t.label}</span>
-            <span onClick={() => delTag(t)} style={{ color: '#7a5a00' }}>×</span>
+            <span onClick={() => delTag(t)} style={{ color: '#8a6a2a' }}>×</span>
           </div>
         ))}
       </div>
@@ -384,13 +379,13 @@ export default function WebSDRPage() {
       {/* spectrum + waterfall share the click/drag/wheel surface */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, cursor: active ? 'crosshair' : 'default', touchAction: 'none' }}
         onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
-        <canvas ref={specRef} width={N_BINS} height={140} style={{ width: '100%', height: 140, display: 'block', background: '#020503' }} />
+        <canvas ref={specRef} width={N_BINS} height={140} style={{ width: '100%', height: 140, display: 'block', background: '#080a0b' }} />
         <div ref={boxRef} style={{ flex: 1, minHeight: 0, background: '#000' }}>
           <canvas ref={wfRef} width={N_BINS} height={300} style={{ width: '100%', height: '100%', display: 'block', imageRendering: 'pixelated' }} />
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 10, color: '#3d6b52', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 10, color: '#66716c', flexShrink: 0 }}>
         <AudioPlayer wsPath="/ws/websdr/audio" inputRate={48000} label="WebSDR Audio" />
         <span>click = tune · drag = pan · wheel = zoom · ←/→ = step · +/− = zoom · drag passband edges = bandwidth · click a tag to tune it</span>
       </div>

@@ -4,21 +4,18 @@ export type SdrMode = 'dmr' | 'scanner' | 'adsb' | 'sstv' | 'aprs' | 'meteor' | 
 
 export const SDR_MODES: { mode: SdrMode; label: string }[] = [
   { mode: 'dmr',     label: 'DMR' },
-  { mode: 'scanner', label: 'SCANNER' },
+  { mode: 'scanner', label: 'Scanner' },
   { mode: 'adsb',    label: 'ADS-B' },
   { mode: 'sstv',    label: 'SSTV' },
   { mode: 'aprs',    label: 'APRS' },
   { mode: 'meteor',  label: 'METEOR' },
-  { mode: 'subghz',  label: 'SUB-GHZ' },
-  { mode: 'pager',   label: 'PAGER' },
-  { mode: 'websdr',  label: 'WEBSDR' },
-  { mode: 'trunk',   label: 'TRUNK' },
+  { mode: 'subghz',  label: 'Sub-GHz' },
+  { mode: 'pager',   label: 'Pager' },
+  { mode: 'websdr',  label: 'WebSDR' },
+  { mode: 'trunk',   label: 'Trunk' },
 ]
 
-export const MODE_LABEL: Record<SdrMode, string> = {
-  dmr: 'DMR', scanner: 'SCANNER', adsb: 'ADS-B', sstv: 'SSTV',
-  aprs: 'APRS', meteor: 'METEOR', subghz: 'SUB-GHZ', pager: 'PAGER', websdr: 'WEBSDR', trunk: 'TRUNK',
-}
+export const MODE_LABEL = Object.fromEntries(SDR_MODES.map(m => [m.mode, m.label])) as Record<SdrMode, string>
 
 const INTENT_KEY = 'hampi-intended-mode'
 
@@ -32,6 +29,7 @@ interface ModeCtx {
   switchErr: string
   switchMode: (m: SdrMode) => void
   caps: Partial<Record<SdrMode, ModeCap>>
+  online: boolean | null   // null until the first /api/sdr/mode poll answers
 }
 
 const Ctx = createContext<ModeCtx | null>(null)
@@ -47,6 +45,7 @@ export function ModeProvider({ children }: { children: React.ReactNode }) {
   const [switchErr, setSwitchErr] = useState('')
   const switchingRef = useRef(false)
   const [caps, setCaps] = useState<Partial<Record<SdrMode, ModeCap>>>({})
+  const [online, setOnline] = useState<boolean | null>(null)
 
   useEffect(() => {
     fetch('/api/capabilities').then(r => r.json()).then(d => setCaps(d.modes ?? {})).catch(() => {})
@@ -55,7 +54,8 @@ export function ModeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let alive = true
     const poll = () => fetch('/api/sdr/mode').then(r => r.json())
-      .then(d => { if (alive) setActualMode(d.mode) }).catch(() => {})
+      .then(d => { if (alive) { setActualMode(d.mode); setOnline(true) } })
+      .catch(() => { if (alive) setOnline(false) })
     poll()
     const id = setInterval(poll, 5000)
     return () => { alive = false; clearInterval(id) }
@@ -90,7 +90,7 @@ export function ModeProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <Ctx.Provider value={{ actualMode, intendedMode, setIntendedMode, switching, switchErr, switchMode, caps }}>
+    <Ctx.Provider value={{ actualMode, intendedMode, setIntendedMode, switching, switchErr, switchMode, caps, online }}>
       {children}
     </Ctx.Provider>
   )

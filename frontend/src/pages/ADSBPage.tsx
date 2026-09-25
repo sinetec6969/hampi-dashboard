@@ -26,16 +26,16 @@ interface Aircraft {
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 function altColor(alt: number | null): string {
-  if (alt === null) return '#7fbf9a'
-  if (alt <  2000) return '#44ff88'
-  if (alt < 10000) return '#44ccff'
-  if (alt < 25000) return '#4488ff'
+  if (alt === null) return '#9aa5a0'
+  if (alt <  2000) return '#35d07f'
+  if (alt < 10000) return '#4db6c4'
+  if (alt < 25000) return '#4e9ddb'
   return '#ffffff'
 }
 
 function planeIcon(heading: number | null, altitude: number | null, selected: boolean): L.DivIcon {
   const deg   = heading ?? 0
-  const color = selected ? '#ffcc00' : altColor(altitude)
+  const color = selected ? '#e5c03d' : altColor(altitude)
   const size  = selected ? 22 : 18
   return L.divIcon({
     className: '',
@@ -188,7 +188,7 @@ export default function ADSBPage() {
   return (
     <div className="adsb-page">
       <div className="adsb-header">
-        <span className="adsb-header-title">┌─ ADS-B</span>
+        <span className="adsb-header-title">ADS-B</span>
         <span className="adsb-count">{count} tracked</span>
         <span className={'badge ' + (connected ? 'badge-green' : 'badge-red')}>
           {connected ? '● Live' : '○ Offline'}
@@ -212,7 +212,7 @@ export default function ADSBPage() {
             {selAc && selAc.track.length > 1 && (
               <Polyline
                 positions={selAc.track as [number, number][]}
-                pathOptions={{ color: '#ffcc00', weight: 2, opacity: 0.7 }}
+                pathOptions={{ color: '#e5c03d', weight: 2, opacity: 0.7 }}
               />
             )}
 
@@ -271,8 +271,8 @@ export default function ADSBPage() {
                 <span className="adsb-detail-label">Vert rate</span>
                 <span className="adsb-detail-val" style={{
                   color: selAc.vrate === null ? undefined
-                       : selAc.vrate > 100 ? '#44ff88'
-                       : selAc.vrate < -100 ? '#ff3355'
+                       : selAc.vrate > 100 ? '#35d07f'
+                       : selAc.vrate < -100 ? '#e05858'
                        : undefined
                 }}>
                   {fmtVr(selAc.vrate)}

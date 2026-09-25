@@ -34,9 +34,9 @@ function stateLabel(s: SSTVStatus['state']): string {
 }
 
 function stateColor(s: SSTVStatus['state']): string {
-  if (s === 'line_decode') return '#ff8800'
-  if (s === 'vis_decode' || s === 'sync_hunt') return '#ffb000'
-  return '#4d7a62'
+  if (s === 'line_decode') return '#e08a3c'
+  if (s === 'vis_decode' || s === 'sync_hunt') return '#e5a93d'
+  return '#66716c'
 }
 
 export default function SSTVPage() {
@@ -162,8 +162,8 @@ export default function SSTVPage() {
     <div className="sstv-page">
       {/* Header */}
       <div className="sstv-header">
-        <span className="sstv-title">┌─ SSTV</span>
-        <span style={{ color: '#ff8800', fontFamily: 'inherit', fontSize: 13 }}>
+        <span className="sstv-title">SSTV</span>
+        <span style={{ color: '#e08a3c', fontFamily: 'inherit', fontSize: 13 }}>
           {(tunedHz / 1e6).toFixed(3)} MHz
         </span>
         <div className="sstv-header-center">

@@ -95,7 +95,7 @@ export default function AX25Page() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 8 }}>
       <div className="header">
-        <span className="header-title">┌─ AX.25 TERMINAL</span>
+        <span className="header-title">AX.25 terminal</span>
         <span className="header-freq">{(freq / 1e6).toFixed(4)} MHz</span>
         <Controls
           freq={freq} gain={gain}
@@ -105,7 +105,7 @@ export default function AX25Page() {
         <span className={'badge ' + (active && kissUp ? 'badge-green' : 'badge-red')}>
           {active && kissUp ? '● KISS' : '○ KISS'}
         </span>
-        <span className="badge" style={{ color: '#ff8844', borderColor: '#ff8844' }}>
+        <span className="badge" style={{ color: '#e08a3c', borderColor: '#e08a3c' }}>
           RX only — TX lands with Phase A (Digirig)
         </span>
       </div>
@@ -125,11 +125,11 @@ export default function AX25Page() {
 
       <div style={{
         flex: 1, minHeight: 120, overflowY: 'auto', background: '#000',
-        border: '1px solid #1d4030', padding: 8, fontSize: 12,
-        whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#33ff66',
+        border: '1px solid #343c3d', padding: 8, fontSize: 12,
+        whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#35d07f',
       }}>
         {frames.length === 0 ? (
-          <span style={{ color: '#4d7a62' }}>
+          <span style={{ color: '#66716c' }}>
             {active
               ? 'Monitoring. Frames print here as direwolf decodes them — click the waterfall or type a frequency to retune the whole chain. Zero frames on a 70cm whip is normal; 2m antenna pending.'
               : 'The terminal wakes up in APRS mode — one direwolf feeds both pages.'}

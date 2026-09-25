@@ -67,13 +67,13 @@ export default function PagerPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10, padding: 12 }}>
       <div className="header">
-        <span className="header-title">┌─ PAGER</span>
+        <span className="header-title">Pager</span>
         <span className="header-freq">{(freq / 1e6).toFixed(4)} MHz</span>
         <span className={'badge ' + (active && st?.running ? 'badge-green' : 'badge-red')}>
           {active && st?.running ? '● Listening' : '○ Idle'}
         </span>
-        <span style={{ fontSize: 12, color: '#7fbf9a' }}>POCSAG 512/1200/2400 · FLEX</span>
-        <span style={{ fontSize: 12, color: '#7fbf9a' }}>{st?.count ?? 0} pages</span>
+        <span style={{ fontSize: 12, color: '#9aa5a0' }}>POCSAG 512/1200/2400 · FLEX</span>
+        <span style={{ fontSize: 12, color: '#9aa5a0' }}>{st?.count ?? 0} pages</span>
       </div>
 
       {!active ? (
@@ -83,7 +83,7 @@ export default function PagerPage() {
           <button className="btn" onClick={enable} disabled={busy}>{busy ? 'switching…' : 'Switch to PAGER mode'}</button>
         </div>
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#7fbf9a', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#9aa5a0', flexWrap: 'wrap' }}>
           <span>FREQ</span>
           <input value={freqIn} onChange={e => setFreqIn(e.target.value)} onKeyDown={e => e.key === 'Enter' && tune()}
                  style={{ width: 100 }} /> MHz
@@ -91,38 +91,38 @@ export default function PagerPage() {
           <input value={gainIn} onChange={e => setGainIn(e.target.value)} onKeyDown={e => e.key === 'Enter' && tune()}
                  style={{ width: 50 }} /> dB
           <button className="btn" onClick={tune} disabled={busy}>{busy ? 'retuning…' : 'Tune'}</button>
-          <span style={{ color: '#4d7a62' }}>US paging lives at 152–159 MHz (VHF) and 929–932 MHz (UHF, mostly FLEX).</span>
-          {err && <span style={{ color: '#ff3355' }}>{err}</span>}
+          <span style={{ color: '#66716c' }}>US paging lives at 152–159 MHz (VHF) and 929–932 MHz (UHF, mostly FLEX).</span>
+          {err && <span style={{ color: '#e05858' }}>{err}</span>}
         </div>
       )}
 
       {active && st?.last_log && (
-        <div style={{ fontSize: 11, color: '#5a5', background: '#000', border: '1px solid #0d2418', padding: '4px 8px', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 11, color: '#9aa5a0', background: '#000', border: '1px solid #252b2c', padding: '4px 8px', overflowX: 'auto', whiteSpace: 'nowrap' }}>
           {st.last_log}
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid #1d4030', background: '#040805' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid #343c3d', background: '#0d1011' }}>
         {pages.length === 0 ? (
-          <div style={{ color: '#4d7a62', padding: 12, fontSize: 13 }}>
+          <div style={{ color: '#66716c', padding: 12, fontSize: 13 }}>
             No pages yet. An active paging channel bursts every few seconds to minutes — if nothing lands in
             a couple of minutes, try another frequency.
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ color: '#4d7a62', textAlign: 'left' }}>
+              <tr style={{ color: '#66716c', textAlign: 'left' }}>
                 <th style={{ padding: '4px 10px' }}>TIME</th><th>PROTO</th><th>ADDR</th><th>FN</th><th>MESSAGE</th>
               </tr>
             </thead>
             <tbody>
               {pages.map((p, i) => (
-                <tr key={i} style={{ borderTop: '1px solid #0d2418', color: '#a8e8c4', verticalAlign: 'top' }}>
-                  <td style={{ padding: '4px 10px', color: '#6aa886', whiteSpace: 'nowrap' }}>{new Date(p.ts * 1000).toLocaleTimeString()}</td>
+                <tr key={i} style={{ borderTop: '1px solid #252b2c', color: '#cfd6d2', verticalAlign: 'top' }}>
+                  <td style={{ padding: '4px 10px', color: '#8a9590', whiteSpace: 'nowrap' }}>{new Date(p.ts * 1000).toLocaleTimeString()}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{p.proto}</td>
                   <td>{p.addr ?? '—'}</td>
                   <td>{p.func ?? ''}</td>
-                  <td style={{ color: '#c8ffe0', wordBreak: 'break-word' }}>{p.text || <span style={{ color: '#4d7a62' }}>(tone only)</span>}</td>
+                  <td style={{ color: '#e7ece9', wordBreak: 'break-word' }}>{p.text || <span style={{ color: '#66716c' }}>(tone only)</span>}</td>
                 </tr>
               ))}
             </tbody>

@@ -4,9 +4,9 @@ export default function AllScanPage() {
   return (
     <>
       <div className="header">
-        <span className="header-title">┌─ ALLSCAN</span>
+        <span className="header-title">AllScan</span>
         <a href={ALLSCAN_URL} target="_blank" rel="noreferrer"
-           style={{ fontSize: 11, letterSpacing: 1, color: '#4d7a62', textDecoration: 'none' }}>
+           style={{ fontSize: 11, letterSpacing: 1, color: '#66716c', textDecoration: 'none' }}>
           OPEN DIRECT ↗
         </a>
       </div>
