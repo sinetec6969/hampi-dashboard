@@ -22,3 +22,6 @@ radioid.db
 tle_amsat.txt
 meteor_images/
 tle_cache.txt
+
+# Offline map tiles (PMTiles extracts — see STATE.md)
+tiles/

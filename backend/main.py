@@ -98,6 +98,7 @@ N_FFT:          int   = 1024
 SDR_RTL_DEV: int | str = os.getenv("SDR_RTL_DEV", cfg("sdr.rtl_device", 0))
 SERVER_PORT:    int   = int(os.getenv("PORT", cfg("server.port", 8000)))
 FRONTEND_DIST:  str   = os.getenv("FRONTEND_DIST", cfg("server.frontend_dist", "../frontend/dist"))
+TILES_DIR:      str   = os.getenv("TILES_DIR", cfg("server.tiles_dir", "../tiles"))   # offline PMTiles
 HISTORY_FILE:   str   = os.getenv("HISTORY_FILE", cfg("server.history_file",
                                    os.path.join(os.path.dirname(__file__), "..", "call_history.json")))
 MAX_HISTORY:    int   = 200
@@ -2197,6 +2198,13 @@ class SPAStaticFiles(StaticFiles):
                 return await super().get_response("index.html", scope)
             raise
 
+
+# PMTiles readers fetch byte ranges — StaticFiles/FileResponse honour Range
+_tiles = os.path.join(os.path.dirname(__file__), TILES_DIR)
+if os.path.isdir(_tiles):
+    app.mount("/tiles", StaticFiles(directory=_tiles), name="tiles")
+else:
+    logger.warning("Tiles directory not found at %s — maps will be blank", _tiles)
 
 _dist = os.path.join(os.path.dirname(__file__), FRONTEND_DIST)
 if os.path.isdir(_dist):

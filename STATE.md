@@ -64,6 +64,14 @@ Local DBs: `backend/build_aircraft_db.py`, `build_radioid_db.py`. Auto-start:
 `npm run build` in `frontend/`. `GET /api/capabilities` reports which modes
 have their binaries — missing ones grey out on the home page.
 
+**Maps:** offline Protomaps vector tiles in `tiles/` (gitignored), served at
+`/tiles` — `world.pmtiles` (z0–6, 43 MB) + `region.pmtiles` (Carolinas
+-85.5,32 → -75,37, z0–14, 581 MB), extracted from the 2026-09-23 daily build with
+`pmtiles extract https://build.protomaps.com/20260923.pmtiles tiles/region.pmtiles
+--bbox=-85.5,32.0,-75.0,37.0 --maxzoom=14` (world: `--maxzoom=6`). CARTO's
+keyless basemaps started stamping "API KEY REQUIRED" — nothing map-related
+leaves the LAN now.
+
 **Remote:** `https://hampibase.tail27c8f9.ts.net` via `tailscale serve --bg
 http://localhost:8000` (tailnet only, not Funnel). HTTPS matters: some browser
 APIs the UI uses (`crypto.randomUUID` for memory channels) need a secure context.

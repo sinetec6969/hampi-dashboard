@@ -1,6 +1,7 @@
 import { wsUrl } from '../ws'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, Marker, Popup, useMap } from 'react-leaflet'
+import OfflineTiles from '../components/OfflineTiles'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -637,12 +638,7 @@ export default function MeshtasticPage() {
         {/* Map */}
         <div className="mesh-map">
           <MapContainer center={[30, -20]} zoom={2} style={{ height: '100%', width: '100%' }} zoomControl scrollWheelZoom>
-            <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-              subdomains="abcd"
-              maxZoom={19}
-            />
+            <OfflineTiles />
             <MapAutoCenter nodes={withPos} />
             {withPos.map(node => (
               <Marker
