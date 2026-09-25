@@ -1,29 +1,35 @@
 # Project State — snapshot
 
-**Version:** 0.9-b3t7 · **Code Named HamPi** · **Updated:** 2026-07-31 · **QTH:** EM95of (Charlotte NC) · **Call:** KR4BPW
+**Version:** 0.9-b3t7 · **Code Named HamPi** · **Updated:** 2026-09-24 · **QTH:** EM95of (Charlotte NC) · **Call:** KR4BPW
 
 A single Raspberry Pi 4 + one RTL-SDR Blog V4, all decoding on-device, no cloud.
-Every claim below was exercised on hardware 2026-07-05/06 — see [AUDIT.md](AUDIT.md)
-for the full VERIFIED / RF-GATED / BROKEN breakdown.
+Rebuilt from scratch 2026-09-24 on a new SD card (Debian 13 trixie, host
+`hampibase`) — the original audit was re-run there: every mode switches clean,
+no zombies, self-tests pass. See [AUDIT.md](AUDIT.md) for the original
+VERIFIED / RF-GATED / BROKEN breakdown.
 
-## Live modes (device 0 — home-page SDR switcher)
+## Live modes (device 0 switcher, plus independent Meshtastic / TinyGS / BLE)
 
 | Mode | Audit status | Notes |
 |---|---|---|
-| DMR | verified | metadata + **live audio** (UDP blaster) · TG aliases · offline RadioID DB (307k) · call history |
-| Trunked DMR | verified | Carolina Connect Site 004 via SDRTrunk user service · tuner lock ~20 s · encrypted-TG flags |
+| DMR | verified | metadata + **live audio** (UDP blaster) · TG aliases · offline RadioID DB (314k) · call history · dsd-fme auto-restarts if it dies |
+| Trunked DMR | **not installed** | verified on the old card; SDRTrunk + JMBE + user service not rebuilt on trixie yet (see SDRTRUNK.md) — switch fails clean and rolls back to DMR |
 | Scanner AM/FM | verified (AM) | AM + FM anywhere in VHF/UHF · `.ini` favourites · adjustable dwell/hold · squelch-gated browser audio. FM path verified against synthetic IQ, not yet off-air |
 | ADS-B | verified | 1090 MHz · CPR positions live · local fleet DB (516k) · track map |
 | SSTV | RF-gated | decoder + sat tracking/Doppler verified; no off-air image yet (needs an ISS event or test TX) |
 | APRS | RF-gated | chain runs to the antenna jack; **zero real decodes — 70cm whip is deaf on 2m** |
 | AX.25 | RF-gated | KISS terminal live against direwolf; same antenna gate |
-| METEOR LRPT | RF-gated | SatDump chain verified decoding; first MSU-MR composite needs a pass |
-| Meshtastic | verified | `/dev/meshtastic` · 204 nodes · send is code-sound, not exercised (real TX) |
+| METEOR LRPT | RF-gated | SatDump chain verified decoding; first MSU-MR composite needs a pass. Now the only 137 MHz imagery — NOAA APT is gone (see INTERCEPT.md) |
+| Sub-GHz | verified | rtl_433 · hops 433.92 / 315 MHz (US TPMS) every 60 s · Acurite-606TX decoded; no 315 MHz decode yet (needs passing traffic) |
+| Pager | verified | rtl_fm → multimon-ng · POCSAG + FLEX · live retune · 34 FLEX pages / 90 s on 929.6125 MHz (found by band survey; 152–159 MHz quiet here) |
+| Meshtastic | verified | `/dev/meshtastic` · 202 nodes · send is code-sound, not exercised (real TX) |
+| BLE scan | verified | built-in radio, runs beside any SDR mode · ~80 devices · Find My / Tile / Chipolo / SmartTag / Google FMDN tracker flags |
 | Satellite telemetry | hardware-gated | MQTT path verified; **LilyGO T3 currently unplugged** — replug and it flows |
 
 ## Transmit — Phase A (in progress, NOT RF-confirmed)
 
-Digirig wired, `/dev/digirig` udev rule now **installed** (2026-07-06). Radio TX page
+Digirig wired, `/dev/digirig` udev rule installed (reinstalled on the new card;
+Digirig not plugged in at rebuild time). Radio TX page
 live, hard-gated: `radio.tx_enable: false` default + callsign requirement + serial
 never opened until both pass (guards self-tested). A valid APRS beacon existed in
 software (2026-06-13); **nobody has confirmed the BF-F8HP keys** — that TX-LED check
@@ -38,12 +44,43 @@ LoRa32 TinyGS (`/dev/tinygs`, unplugged right now) · Digirig Mobile (`/dev/digi
 
 ## Build / run
 
-Source builds required: rtl-sdr-blog driver + dsd-fme (both in `/usr/local/bin`).
-Apt: `sudo apt install direwolf satdump`. Python deps in `backend/requirements.txt`.
-Config via `config.yaml` (env vars override, defaults below both — precedence
-tested). Optional local DBs: `backend/build_aircraft_db.py`, `build_radioid_db.py`.
-Auto-start: `hampi-dashboard.service`. Stable device names: `99-hampi.rules`
-(installed). Frontend: `npm run build` in `frontend/`.
+Clone lives at `~/projects/hampi-dashboard`; `~/hampi-dashboard` is a symlink to
+it (the service unit uses that path). Source builds in `~/src`, installed to
+`/usr/local`:
+
+- **rtl-sdr-blog** (`-DDETACH_KERNEL_DRIVER=ON`) — V4 support. Don't install
+  apt `rtl-sdr`/`rtl-433`: they pull in the stock librtlsdr.
+- **mbelib** (`ambe_tones` branch) → **dsd-fme**
+- **rtl_433** — built against the rtl-sdr-blog lib
+- **multimon-ng** — apt 1.3 lacks `--json`
+
+Apt: `direwolf satdump mosquitto nodejs npm` plus the build deps.
+`/etc/modprobe.d/blacklist-rtlsdr.conf` keeps `dvb_usb_rtl28xxu` off the dongle.
+Bluetooth: `rfkill unblock bluetooth` (it ships soft-blocked). Python deps in
+`backend/requirements.txt` (now includes `bleak`, `bluetooth-numbers`). Config
+via `config.yaml` (env vars override, defaults below both — precedence tested).
+Local DBs: `backend/build_aircraft_db.py`, `build_radioid_db.py`. Auto-start:
+`hampi-dashboard.service`. Stable device names: `99-hampi.rules`. Frontend:
+`npm run build` in `frontend/`. `GET /api/capabilities` reports which modes
+have their binaries — missing ones grey out on the home page.
+
+**Remote:** `https://hampibase.tail27c8f9.ts.net` via `tailscale serve --bg
+http://localhost:8000` (tailnet only, not Funnel). HTTPS matters: some browser
+APIs the UI uses (`crypto.randomUUID` for memory channels) need a secure context.
+
+## Since 0.9-b3t7 (2026-09-24)
+
+New SD card, full rebuild on trixie (above). From the [INTERCEPT.md](INTERCEPT.md)
+P0 plan: capability probe, **Sub-GHz** (rtl_433), **BLE** scanner with tracker
+flags, **Pager** (POCSAG/FLEX). P0.3 NOAA APT dropped — the satellites were
+decommissioned in 2025. Three fixes: `DMRDecoder.stop()` no longer crashes when
+dsd-fme is already dead (it used to skip the rest of shutdown and orphan
+rtl_tcp), dsd-fme restarts itself after an unexpected exit, and leaving DMR no
+longer logs "Future exception was never retrieved".
+
+Pager note: the active 929.6125 channel is hospital paging — patient names in
+the clear. Pages live in memory only (last 300), never on disk. Alphanumeric
+pages are covered by ECPA in the US.
 
 ## Since 0.9-b3t6
 
