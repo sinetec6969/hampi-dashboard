@@ -976,7 +976,7 @@ async def api_sysinfo():
         "hostname":     socket.gethostname(),
         "local_ip":     None,
         "tailscale_ip": None,
-        "version":      "0.9-b3t5",
+        "version":      "0.9-b3t8",
         "geocode":      GEOCODE_ENABLE,
     }
     try:

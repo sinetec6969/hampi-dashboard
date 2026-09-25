@@ -1,13 +1,32 @@
-# HamPi SDR Dashboard
+<div align="center">
+
+```
+██╗  ██╗ █████╗ ███╗   ███╗██████╗ ██╗
+██║  ██║██╔══██╗████╗ ████║██╔══██╗██║
+███████║███████║██╔████╔██║██████╔╝██║
+██╔══██║██╔══██║██║╚██╔╝██║██╔═══╝ ██║
+██║  ██║██║  ██║██║ ╚═╝ ██║██║     ██║
+╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚═╝
+      ▚ 0.9-b3t8 · r3b0rn ▚
+```
+
+### The whole spectrum. One Raspberry Pi. Zero cloud.
+
+![Version](https://img.shields.io/badge/version-0.9--b3t8_r3b0rn-00ff88?style=for-the-badge&labelColor=030604)
+![Status](https://img.shields.io/badge/status-beta-ffb000?style=for-the-badge&labelColor=030604)
+![Cloud](https://img.shields.io/badge/cloud-none-ff3355?style=for-the-badge&labelColor=030604)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square&logo=python&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-asyncio-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![RTL-SDR](https://img.shields.io/badge/RTL--SDR-Blog_V4-ff6600?style=flat-square)
+![Platform](https://img.shields.io/badge/Raspberry_Pi_4-trixie-c51a4a?style=flat-square&logo=raspberry-pi&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
-![Platform](https://img.shields.io/badge/platform-Raspberry_Pi-c51a4a?style=flat-square&logo=raspberry-pi&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.9--b3t7_HamPi-blueviolet?style=flat-square)
-![Status](https://img.shields.io/badge/status-beta-orange?style=flat-square)
+
+**DMR voice · WebSDR · ADS-B · pagers · TPMS · BLE trackers · mesh · satellites**
+*decoded on-device, served to any browser on your LAN or tailnet*
+
+</div>
 
 ---
 
@@ -18,6 +37,18 @@ Digital voice decoded. Aircraft tracked. Pagers, tire sensors and Bluetooth trac
 logged. Mesh nodes mapped. A WebSDR-style receiver you can zoom, tune and tag.
 **No cloud. No subscription. No API keys. Nothing leaves your network unless you
 flip a switch that says so.**
+
+### ⚡ New in r3b0rn
+
+Wiped the SD card, rebuilt the Pi from nothing on Debian 13 — and it came back with more ears.
+
+| | |
+|---|---|
+| 🎛️ **WebSDR** | Zoom the waterfall from 2.4 MHz down to 19 kHz. NFM · AM · WFM · USB · LSB · CW. Drag the passband. Tag what you find. |
+| 📟 **Pager** | POCSAG + FLEX, live-retunable. Found the local FLEX carrier and pulled 34 pages in 90 seconds. |
+| 🚗 **Sub-GHz** | rtl_433 hopping 433.92 ↔ 315 MHz — weather stations, doorbells, remotes, and the tire-pressure sensors of cars going by. |
+| 🔵 **BLE** | The Pi's own Bluetooth, running beside every SDR mode. Flags AirTags separated from their owner, Tiles, SmartTags. |
+| 🗺️ **Offline maps** | Self-hosted vector tiles. No tile server, no API key — your map views stay home. |
 
 ---
 
@@ -354,7 +385,7 @@ paging lives at 152–159 and 929–932 MHz. The WebSDR waterfall finds the carr
 
 ## Version history
 
-### Unreleased — 2026-09-24
+### 0.9-b3t8 · r3b0rn — 2026-09-24
 Rebuilt from scratch on a new SD card (Debian 13 trixie) and re-audited — every mode
 switches clean, no zombies. New: **WebSDR** receiver page with zoom, six demod modes
 and frequency tags; **Pager** (POCSAG/FLEX); **Sub-GHz** (rtl_433 with 315 MHz TPMS

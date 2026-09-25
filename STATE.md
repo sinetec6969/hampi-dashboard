@@ -1,6 +1,6 @@
 # Project State — snapshot
 
-**Version:** 0.9-b3t7 · **Code Named HamPi** · **Updated:** 2026-09-24 · **QTH:** EM95of (Charlotte NC) · **Call:** KR4BPW
+**Version:** 0.9-b3t8 · **r3b0rn** · **Updated:** 2026-09-24 · **QTH:** EM95of (Charlotte NC) · **Call:** KR4BPW
 
 A single Raspberry Pi 4 + one RTL-SDR Blog V4, all decoding on-device, no cloud.
 Rebuilt from scratch 2026-09-24 on a new SD card (Debian 13 trixie, host
@@ -76,7 +76,7 @@ leaves the LAN now.
 http://localhost:8000` (tailnet only, not Funnel). HTTPS matters: some browser
 APIs the UI uses (`crypto.randomUUID` for memory channels) need a secure context.
 
-## Since 0.9-b3t7 (2026-09-24)
+## 0.9-b3t8 · r3b0rn (2026-09-24)
 
 New SD card, full rebuild on trixie (above). From the [INTERCEPT.md](INTERCEPT.md)
 P0 plan: capability probe, **Sub-GHz** (rtl_433), **BLE** scanner with tracker

@@ -366,7 +366,7 @@ export default function Home() {
           {/* header bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', borderBottom: '1px solid #123322', background: '#050a07' }}>
             <span onClick={() => navigate('/')} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 2, color: '#00ff88', textShadow: '0 0 10px rgba(0,255,136,.5)', cursor: 'pointer' }}>▚ HAMPI://RX</span>
-            <span style={{ fontSize: 10, color: '#3d6b52' }}>v{info?.version ?? '0.9-b3t5'}</span>
+            <span style={{ fontSize: 10, color: '#3d6b52' }}>v{info?.version ?? '0.9-b3t8'}</span>
             <span style={{ fontFamily: "'VT323', monospace", fontSize: 24, color: '#7dffb8', marginLeft: 'auto', textShadow: '0 0 8px rgba(0,255,136,.4)' }}>
               {fmtClock(new Date(now))}<span className="rx-blink">▌</span>
             </span>
@@ -556,7 +556,7 @@ export default function Home() {
             {info?.tailscale_ip && <span>tailscale <span style={{ color: '#7fbf9a' }}>{info.tailscale_ip}:8000</span></span>}
             <span title="connected browsers: waterfall / DMR metadata">clients <span style={{ color: '#7fbf9a' }}>wf:{clients.waterfall || 0} dmr:{clients.dmr || 0}</span></span>
             <span style={{ marginLeft: 'auto' }}>
-              ver <span style={{ color: '#7fbf9a' }}>{info?.version ?? '0.9-b3t5'}</span> · <a href="https://github.com/sinetec6969/hampi-dashboard" target="_blank" rel="noreferrer" style={{ color: '#7fbf9a' }}>github</a>
+              ver <span style={{ color: '#7fbf9a' }}>{info?.version ?? '0.9-b3t8'}</span> · <a href="https://github.com/sinetec6969/hampi-dashboard" target="_blank" rel="noreferrer" style={{ color: '#7fbf9a' }}>github</a>
             </span>
           </div>
         </div>
