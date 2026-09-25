@@ -763,3 +763,22 @@
 .dash-main > .ui-panel, .dash-side > .ui-panel { flex-shrink: 0; }
 .dash-main > .spectrum { flex: 1 0 340px; }
 .scanner-controls > * { flex-shrink: 0; }
+
+/* ── generic page scaffold (new pages) ─────────────────────────────────── */
+.page { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.page > * { flex-shrink: 0; }
+
+/* ── surveillance ─────────────────────────────────────────────────────── */
+.surv-summary { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; }
+.surv-metrics { padding-top: 14px; }
+.surv-sensors { list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-md); color: var(--text-2); }
+.surv-sensors li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.surv-sensors b { color: var(--text); font-weight: 500; }
+.surv-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text-2); cursor: pointer; }
+.surv-table-panel { flex-shrink: 1 !important; min-height: 220px; }
+.surv-scroll { overflow: auto; max-height: 60vh; }
+.surv-kind { display: inline-flex; align-items: center; gap: 6px; }
+.surv-kind svg { color: var(--text-3); }
+.surv-evidence { font-size: var(--fs-sm); max-width: 360px; }
+.surv-note { font-size: var(--fs-sm); color: var(--text-3); line-height: 1.6; max-width: 900px; }
+@media (max-width: 900px) { .surv-summary { grid-template-columns: 1fr; } }

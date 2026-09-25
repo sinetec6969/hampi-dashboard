@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Mic, Network, Plane, Radar, MapPin, SquareTerminal, Image, CloudSun, Antenna,
   MessageSquareText, AudioWaveform, Waypoints, Satellite, Bluetooth, Radio, Sun, Moon, Server,
-  ChevronRight,
+  ChevronRight, Cctv,
 } from 'lucide-react'
 import { wsUrl } from '../ws'
 import { useMode, type SdrMode } from '../mode'
@@ -171,6 +171,7 @@ interface SideStatus {
   ble?: { running: boolean; devices: number; trackers: number }
   sat?: { mqtt_connected: boolean; packet_count: number }
   adsb?: { aircraft_count: number }
+  surv?: { running: boolean; ring: number; flock: number; counts: { high: number }; wifi_error: string }
 }
 
 function useSideStatus(actualMode: SdrMode | null) {
@@ -179,11 +180,12 @@ function useSideStatus(actualMode: SdrMode | null) {
     let alive = true
     const get = (url: string) => fetch(url).then(r => r.ok ? r.json() : undefined).catch(() => undefined)
     const load = async () => {
-      const [ble, sat, adsb] = await Promise.all([
+      const [ble, sat, adsb, surv] = await Promise.all([
         get('/api/ble/status'), get('/api/satellite/status'),
         actualMode === 'adsb' ? get('/api/adsb/status') : Promise.resolve(undefined),
+        get('/api/surveil/status'),
       ])
-      if (alive) setS({ ble, sat, adsb })
+      if (alive) setS({ ble, sat, adsb, surv })
     }
     load()
     const t = setInterval(load, 10_000)
@@ -197,7 +199,7 @@ const COND_TONE: Record<string, Tone> = { Good: 'green', Fair: 'amber', Poor: 'r
 // ── mode cards ──────────────────────────────────────────────────────────────
 interface CardDef {
   name: string; path: string; desc: string; icon: ComponentType<{ size?: number }>
-  sdr?: SdrMode; shared?: boolean; independent?: 'mesh' | 'sat' | 'ble'
+  sdr?: SdrMode; shared?: boolean; independent?: 'mesh' | 'sat' | 'ble' | 'surv'
 }
 const CARDS: CardDef[] = [
   { name: 'DMR',        path: '/dmr',        desc: '438.800 MHz digital voice',     icon: Mic,               sdr: 'dmr' },
@@ -213,6 +215,7 @@ const CARDS: CardDef[] = [
   { name: 'METEOR',     path: '/meteor',     desc: '137.9 MHz LRPT weather',        icon: CloudSun,          sdr: 'meteor' },
   { name: 'Meshtastic', path: '/meshtastic', desc: 'LoRa mesh · USB',               icon: Waypoints,         independent: 'mesh' },
   { name: 'BLE',        path: '/ble',        desc: 'Built-in Bluetooth scan',       icon: Bluetooth,         independent: 'ble' },
+  { name: 'Surveillance', path: '/surveillance', desc: 'Ring · Flock Safety detection', icon: Cctv,          independent: 'surv' },
   { name: 'Satellite',  path: '/satellite',  desc: 'TinyGS via local MQTT',         icon: Satellite,         independent: 'sat' },
 ]
 
@@ -274,6 +277,14 @@ export default function Home() {
       if (!b) return { tone: 'gray', label: 'Unknown', stat: '—' }
       return b.running ? { tone: 'green', label: 'Scanning', stat: `${b.devices} devices · ${b.trackers} trackers` }
                        : { tone: 'red', label: 'Stopped', stat: 'Bluetooth blocked or off' }
+    }
+    if (c.independent === 'surv') {
+      const v = side.surv
+      if (!v) return { tone: 'gray', label: 'Unknown', stat: '—' }
+      if (!v.running) return { tone: 'gray', label: 'Off', stat: 'Disabled in config' }
+      const n = v.ring + v.flock
+      if (v.counts.high > 0) return { tone: 'red', label: `${v.counts.high} detected`, stat: `${v.flock} Flock · ${v.ring} Ring` }
+      return { tone: 'green', label: 'Watching', stat: n ? `${n} possible` : v.wifi_error ? 'BLE only — WiFi scan failing' : 'BLE + WiFi APs' }
     }
     if (c.independent === 'sat') {
       const s = side.sat

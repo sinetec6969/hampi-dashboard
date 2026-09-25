@@ -44,6 +44,7 @@ from subghz import SubGHzDecoder
 from pager import PagerDecoder
 from websdr import WebSDRReceiver, MODES as WEBSDR_MODES, DEFAULT_BW as WEBSDR_DEFAULT_BW
 from ble import BLEScanner
+from surveil import SurveillanceDetector
 from sdrtrunk import TrunkMonitor
 from dmr import DMRDecoder
 from meshtastic_handler import MeshtasticHandler
@@ -221,6 +222,12 @@ MQTT_PORT:   int  = int(os.getenv("MQTT_PORT", cfg("satellite.mqtt_port", 1883))
 BLE_ENABLE: bool = cfg_bool("BLE_ENABLE", "ble.enable", 1)
 BLE_TTL_S:  int  = int(os.getenv("BLE_TTL_S", cfg("ble.ttl_s", 600)))
 
+# Ring / Flock detection over BLE adverts + WiFi AP scan (surveil.py)
+SURVEIL_ENABLE: bool = cfg_bool("SURVEIL_ENABLE", "surveil.enable", 1)
+SURVEIL_WIFI_S: int  = int(os.getenv("SURVEIL_WIFI_S", cfg("surveil.wifi_scan_s", 30)))
+SURVEIL_LOG:    str  = os.getenv("SURVEIL_LOG", cfg("surveil.log_file",
+                                 os.path.join(os.path.dirname(__file__), "..", "surveillance_log.jsonl")))
+
 # Station identity + radio TX (Phase A — Digirig). TX is hard-gated off by default.
 STATION:     dict = cfg("station", None) or {}
 TX_ENABLE:   bool = cfg_bool("TX_ENABLE", "radio.tx_enable", 0)
@@ -252,6 +259,7 @@ adsb_clients:       Set[WebSocket] = set()
 sstv_clients:       Set[WebSocket] = set()
 satellite_clients:  Set[WebSocket] = set()
 ble_clients:        Set[WebSocket] = set()
+surveil_clients:    Set[WebSocket] = set()
 aprs_clients:       Set[WebSocket] = set()
 ax25_clients:       Set[WebSocket] = set()
 meteor_clients:     Set[WebSocket] = set()
@@ -271,6 +279,7 @@ _mode_websdr: Optional[WebSDRReceiver] = None  # rides the shared SDREngine like
 _mode_trunk:  Optional[TrunkMonitor]  = None  # SDRTrunk service owns device 0
 satellite_monitor: Optional[SatelliteMonitor] = None
 ble_scanner: Optional[BLEScanner] = None
+surveil: Optional[SurveillanceDetector] = None
 radio: Optional[RadioInterface] = None
 sat_tracker: Optional[SatTracker] = None
 
@@ -432,6 +441,10 @@ async def on_satellite_status(status: dict) -> None:
 
 async def on_ble_update(msg: dict) -> None:
     await broadcast_json(ble_clients, msg)
+
+
+async def on_surveil_update(msg: dict) -> None:
+    await broadcast_json(surveil_clients, msg)
 
 
 async def on_meteor_status(msg: dict) -> None:
@@ -686,7 +699,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, scanner, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker, ble_scanner
+    global sdr, decoder, scanner, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker, ble_scanner, surveil
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -772,8 +785,13 @@ async def lifespan(app: FastAPI):
             logger.warning("SatelliteMonitor failed to start", exc_info=True)
             satellite_monitor = None
 
+    if SURVEIL_ENABLE:
+        surveil = SurveillanceDetector(wifi_scan_s=SURVEIL_WIFI_S, log_path=SURVEIL_LOG,
+                                       update_callback=on_surveil_update)
+        await surveil.start()
+
     if BLE_ENABLE:
-        ble_scanner = BLEScanner(ttl_s=BLE_TTL_S, update_callback=on_ble_update)
+        ble_scanner = BLEScanner(ttl_s=BLE_TTL_S, update_callback=on_ble_update, surveil=surveil)
         try:
             await ble_scanner.start()
         except Exception as exc:
@@ -856,6 +874,8 @@ async def lifespan(app: FastAPI):
         await satellite_monitor.stop()
     if ble_scanner is not None:
         await ble_scanner.stop()
+    if surveil is not None:
+        await surveil.stop()
     if radio is not None:
         radio.stop()
     logger.info("Shutdown complete")
@@ -2349,6 +2369,39 @@ async def ws_ble(websocket: WebSocket):
         logger.exception("Unexpected error in BLE WebSocket handler")
     finally:
         ble_clients.discard(websocket)
+
+
+@app.websocket("/ws/surveil")
+async def ws_surveil(websocket: WebSocket):
+    await websocket.accept()
+    surveil_clients.add(websocket)
+    try:
+        if surveil is not None:
+            await websocket.send_text(json.dumps({"type": "detections",
+                                                  "detections": surveil.detection_list(),
+                                                  "status": surveil.status_dict()}))
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in surveillance WebSocket handler")
+    finally:
+        surveil_clients.discard(websocket)
+
+
+@app.get("/api/surveil/status")
+async def api_surveil_status():
+    if surveil is None:
+        return {"type": "status", "running": False, "counts": {"high": 0, "medium": 0, "low": 0},
+                "ring": 0, "flock": 0, "wifi_error": "disabled in config", "last_wifi_scan": 0,
+                "aps_seen": 0, "wifi_scan_s": SURVEIL_WIFI_S}
+    return surveil.status_dict()
+
+
+@app.get("/api/surveil/detections")
+async def api_surveil_detections():
+    return surveil.detection_list() if surveil is not None else []
 
 
 @app.get("/api/ble/status")

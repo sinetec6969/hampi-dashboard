@@ -3,7 +3,7 @@ import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, RadioTower, AudioWaveform, Mic, Network, Radar, MessageSquareText,
   MapPin, SquareTerminal, Waypoints, Plane, Image, CloudSun, Satellite, Antenna,
-  Bluetooth, Siren, Clock, Menu, X, Activity,
+  Bluetooth, Siren, Clock, Menu, X, Activity, Cctv,
 } from 'lucide-react'
 import './App.css'
 import { useMode, type SdrMode } from './mode'
@@ -27,6 +27,7 @@ import WebSDRPage from './pages/WebSDRPage'
 import SatellitePage from './pages/SatellitePage'
 import HamClockPage from './pages/HamClockPage'
 import AllScanPage from './pages/AllScanPage'
+import SurveillancePage from './pages/SurveillancePage'
 
 interface NavDef { to: string; label: string; icon: ComponentType; sdr?: SdrMode }
 const NAV: { group: string; items: NavDef[] }[] = [
@@ -55,6 +56,7 @@ const NAV: { group: string; items: NavDef[] }[] = [
   { group: 'Spectrum & devices', items: [
     { to: '/subghz', label: 'Sub-GHz',  icon: Antenna, sdr: 'subghz' },
     { to: '/ble',    label: 'BLE',      icon: Bluetooth },
+    { to: '/surveillance', label: 'Surveillance', icon: Cctv },
     { to: '/radio',  label: 'Radio TX', icon: Siren },
   ] },
   { group: 'Tools', items: [
@@ -145,6 +147,7 @@ export default function App() {
             <Route path="/satellite"  element={<SatellitePage />} />
             <Route path="/hamclock"   element={<HamClockPage />} />
             <Route path="/allscan"    element={<AllScanPage />} />
+            <Route path="/surveillance" element={<SurveillancePage />} />
           </Routes>
         </div>
       </main>

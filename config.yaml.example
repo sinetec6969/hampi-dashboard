@@ -71,6 +71,11 @@ ble:                      # BLE advert scan on the Pi's built-in radio — runs 
   enable: true            # needs hci0 unblocked: rfkill unblock bluetooth
   ttl_s: 600              # drop devices unheard this long
 
+surveil:                  # Ring / Flock Safety detection (BLE adverts + WiFi AP scan)
+  enable: true
+  wifi_scan_s: 30         # nmcli AP scan interval; rescans need a polkit grant (see README)
+  # log_file: ../surveillance_log.jsonl   # first sighting of each device, appended
+
 qth:
   grid: EM95of            # Maidenhead locator — drives satellite pass prediction
 

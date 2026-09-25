@@ -55,9 +55,10 @@ def tracker_kind(mfr: dict[int, bytes], uuids: list[int], sdata: dict[int, bytes
 
 
 class BLEScanner:
-    def __init__(self, ttl_s: int = 600, update_callback: Optional[MsgCb] = None):
+    def __init__(self, ttl_s: int = 600, update_callback: Optional[MsgCb] = None, surveil=None):
         self.ttl_s = ttl_s
         self._cb = update_callback
+        self.surveil = surveil   # SurveillanceDetector — sees every advert
         self.devices: dict[str, dict] = {}
         self._dirty = False
         self._scanner: Optional[BleakScanner] = None
@@ -102,8 +103,12 @@ class BLEScanner:
     # ------------------------------------------------------------------
 
     def _on_adv(self, dev, adv) -> None:
-        self._ingest(dev.address, adv.local_name, adv.rssi, adv.tx_power,
-                     dict(adv.manufacturer_data), adv.service_uuids, dict(adv.service_data))
+        mfr, sdata = dict(adv.manufacturer_data), dict(adv.service_data)
+        self._ingest(dev.address, adv.local_name, adv.rssi, adv.tx_power, mfr, adv.service_uuids, sdata)
+        if self.surveil is not None:
+            props = dev.details.get("props", {}) if isinstance(dev.details, dict) else {}
+            self.surveil.check_ble(dev.address, props.get("AddressType"), adv.local_name, adv.rssi,
+                                   mfr, list(adv.service_uuids) + list(sdata))
 
     def _ingest(self, addr: str, name: Optional[str], rssi: int, tx_power: Optional[int],
                 mfr: dict[int, bytes], service_uuids: list[str], service_data: dict[str, bytes]) -> None:

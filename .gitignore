@@ -24,6 +24,7 @@ meteor_images/
 tle_cache.txt
 signals.json
 websdr_tags.json
+surveillance_log.jsonl
 
 # Offline map tiles (PMTiles extracts — see STATE.md)
 tiles/

@@ -102,6 +102,7 @@ carries text as well as colour.
 | 📟 **Pager** | ✅ Live | POCSAG 512/1200/2400 + FLEX via multimon-ng · live retune · 34 pages / 90 s on the local FLEX channel |
 | 🚗 **Sub-GHz ISM** | ✅ Live | rtl_433, 300+ protocols · hops 433.92 / 315 MHz (US TPMS) · device table |
 | 🔵 **BLE scan** | ✅ Live | built-in Bluetooth, runs beside any SDR mode · ~80 devices · Find My / Tile / Chipolo / SmartTag / Google FMDN tracker flags |
+| 📷 **Surveillance** | ✅ Live (no detections yet) | Ring + Flock Safety detection from BLE adverts and WiFi APs · tiered confidence · sightings log. Signatures tested; no real device in range yet |
 | 📻 Scanner AM/FM | ✅ Live (AM) | AM + FM anywhere in VHF/UHF · editable `.ini` favourites · dwell + hold · FM not yet confirmed off-air |
 | 🌐 Meshtastic LoRa | ✅ Live | node map · messages · send/DM — 202-node mesh |
 | 🗺️ **Offline maps** | ✅ Live | self-hosted Protomaps vector tiles — world + Carolinas to street level, no tile server |
@@ -157,9 +158,11 @@ own beacon. Plan: [ROADMAP-NEXT.md](ROADMAP-NEXT.md).
 mode → SSTV transmit → Winlink (pat). Internet-touching pieces (iGate, Winlink CMS)
 ship off by default with a "this leaves the LAN" warning.
 
-**4. The awareness layer** — a generic alert/watchlist engine over the existing
-WebSocket streams; BLE "seen-over-time" for trackers that follow you; a persistent
-TPMS log; signal identification (sigidwiki-derived table) wired into WebSDR tags.
+**4. The awareness layer** — Ring / Flock Safety detection is the first piece
+(shipped). Next: a monitor-mode WiFi adapter so camera *probe requests* are visible
+too; a generic alert/watchlist engine over the existing WebSocket streams; BLE
+"seen-over-time" for trackers that follow you; a persistent TPMS log; signal
+identification (sigidwiki-derived table) wired into WebSDR tags.
 
 **5. More ears** — ACARS/VDL2 joined against the local airframe DB, utility meters
 (rtlamr), CW decode; FT8 receive via the V4's HF coverage. A **second dongle** turns
@@ -209,6 +212,10 @@ printf "blacklist dvb_usb_rtl28xxu\nblacklist rtl2832\nblacklist rtl2830\n" | \
 
 # Bluetooth ships soft-blocked on Pi OS
 rfkill unblock bluetooth
+
+# Optional: let the service user trigger WiFi rescans (surveillance AP scan);
+# without it the scan uses NetworkManager's own periodic background scans
+echo 'polkit.addRule(function(action, subject) { if (action.id == "org.freedesktop.NetworkManager.wifi.scan" && subject.user == "j") return polkit.Result.YES; });' | sudo tee /etc/polkit-1/rules.d/50-hampi-wifi-scan.rules
 
 # Serial access for Meshtastic / TinyGS / Digirig
 sudo usermod -aG dialout $USER
@@ -326,6 +333,26 @@ alphanumeric pages falls under ECPA — know what you're doing.*
 resolved offline from the Bluetooth SIG company list; trackers flagged, including
 the Find My "separated from owner" advert.
 
+**Surveillance** — detects Ring and Flock Safety devices from public signatures and
+grades each hit **high / medium / low**:
+
+| Signal | Tier |
+|---|---|
+| 13 Ring LLC OUIs and Flock Safety's `B4:1E:52` — IEEE-registered | high |
+| BLE name `Penguin-##########` / `FS Ext Battery`, XUNTONG (`0x09C8`) advert with a `TN…` serial, Flock accessory GATT service, WiFi AP `Flock-XXXXXX` | high |
+| bare 10-digit BLE name, XUNTONG advert without serial, Raven services `0x3100–0x3500`, SSID `Flock` | medium |
+| the 32-OUI community "Flock" list — every one resolves to a generic module vendor (Liteon, Silicon Labs, Espressif…) in the IEEE registry | low, hidden by default |
+
+BLE OUI matches count only for **public** addresses — two Ring OUIs sit in the
+random-static range and would false-alarm otherwise. WiFi comes from
+NetworkManager's AP scan, so it catches camera SoftAPs and Ring/Flock-OUI access
+points without touching the uplink; client probe requests need a monitor-mode
+adapter the Pi's built-in radio can't provide. First sightings append to
+`surveillance_log.jsonl` (gitignored). Firmware-derived signatures come from
+[Flock-You](https://github.com/colonelpanichacks/flock-you) (MIT) by
+colonelpanichacks, companion to the [OUI-SPY](https://github.com/colonelpanichacks/oui-spy)
+hardware.
+
 **Scanner** — AM and FM anywhere the tuner reaches, modulation per channel, squelch
 on carrier magnitude taken *before* the FM discriminator. Favourites in an editable `.ini`.
 
@@ -367,6 +394,8 @@ Device 0 — one owner at a time (home-page switcher)
 Always on, own hardware:
   Heltec V3 (USB)      → MeshtasticHandler → /ws/meshtastic
   hci0 (built-in BT)   → BLEScanner        → /ws/ble
+                           └ every advert → SurveillanceDetector → /ws/surveil
+  wlan0 (nmcli AP scan) ────────────────────┘  (Ring / Flock signatures)
   LilyGO T3 (TinyGS)   → local Mosquitto   → SatelliteMonitor → /ws/satellite
   Digirig (USB, gated) → RadioInterface    → /api/radio/*
 
@@ -396,6 +425,9 @@ files (see Setup), or the browser cached the old CARTO build — hard refresh.
 
 **BLE page: scanner not running** — `rfkill list bluetooth`; unblock and restart the service.
 
+**Surveillance: "not authorized" WiFi scan, or only a handful of APs** — the service
+user can't trigger rescans; install the optional polkit rule from Setup.
+
 **Pager: pipeline up, no pages** — wrong frequency. Hunt with the live retune; US
 paging lives at 152–159 and 929–932 MHz. The WebSDR waterfall finds the carriers fast.
 
@@ -411,6 +443,13 @@ paging lives at 152–159 and 929–932 MHz. The WebSDR waterfall finds the carr
 **DMR caller map is empty** — geocoding is off by default for privacy. `geocode: enable: true` if you're fine with that.
 
 ## Version history
+
+### Unreleased — surveillance detection
+**Ring and Flock Safety detection** (`surveil.py`, Surveillance page, dashboard
+card). BLE adverts plus a NetworkManager WiFi AP scan, graded by confidence. Every
+OUI checked against the IEEE registry, which added two Ring blocks
+(`00:B4:63`, `50:E4:67`) and showed the community "Flock" list to be generic
+module vendors, so it's demoted to low-confidence hints.
 
 ### Unreleased — console redesign
 The frontend went from retro terminal to RF console: new design tokens, Inter +
