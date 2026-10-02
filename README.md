@@ -103,6 +103,8 @@ carries text as well as colour.
 | 🚗 **Sub-GHz ISM** | ✅ Live | rtl_433, 300+ protocols · hops 433.92 / 315 MHz (US TPMS) · device table |
 | 🔵 **BLE scan** | ✅ Live | built-in Bluetooth, runs beside any SDR mode · ~80 devices · Find My / Tile / Chipolo / SmartTag / Google FMDN tracker flags |
 | 📷 **Surveillance** | ✅ Live (no detections yet) | Ring + Flock Safety detection from BLE adverts and WiFi APs · tiered confidence · sightings log. Signatures tested; no real device in range yet |
+| 📹 **Shack Cam** | ✅ Live | USB webcam, on-demand MJPEG relay (no re-encode) · snapshot · fullscreen · runs only while watched |
+| 📋 **Net Log** | ✅ Live | net-control logging via the termnetlog data layer · QRZ/HamDB lookups · flags · operator history · ADIF export |
 | 📻 Scanner AM/FM | ✅ Live (AM) | AM + FM anywhere in VHF/UHF · editable `.ini` favourites · dwell + hold · FM not yet confirmed off-air |
 | 🌐 Meshtastic LoRa | ✅ Live | node map · messages · send/DM — 202-node mesh |
 | 🗺️ **Offline maps** | ✅ Live | self-hosted Protomaps vector tiles — world + Carolinas to street level, no tile server |
@@ -370,6 +372,17 @@ owns the pass workflow (dedicated rtl_tcp, live SNR, gallery, AOS countdowns).
 **Maps** — every map (ADS-B, APRS, Meshtastic, DMR callers) renders self-hosted
 Protomaps vector tiles from `tiles/`. Map views don't leave the LAN.
 
+**Shack Cam** — an on-demand MJPEG relay of a USB webcam. The camera's native
+Motion-JPEG frames are passed through with `ffmpeg -c copy` (no decode/re-encode,
+cheap on the Pi); ffmpeg runs only while someone is viewing and one process fans
+out to all viewers, so the camera and its USB bandwidth are free otherwise.
+
+**Net Log** — a net-control console built on the data layer of
+[termnetlog](https://github.com/sinetec6969/termnetlog) (MIT): start/end nets, log
+check-ins (type a callsign → it's parsed and enriched with a live QRZ/HamDB
+lookup), toggle flags (mobile/portable/traffic/ragchew), browse operator history,
+and export ADIF. The dashboard keeps its own log DB, separate from the termnetlog TUI.
+
 **Radio TX (Phase A)** — RTS-line PTT through a Digirig, a tone generator for
 deviation calibration, and three hard gates: `tx_enable: false` by default, a
 callsign on every TX call, and the serial port never opened until both pass.
@@ -443,6 +456,16 @@ paging lives at 152–159 and 929–932 MHz. The WebSDR waterfall finds the carr
 **DMR caller map is empty** — geocoding is off by default for privacy. `geocode: enable: true` if you're fine with that.
 
 ## Version history
+
+### Unreleased — net log, shack cam, APRS TX, robustness
+**Net Log** (`netlog.py`, Net Log page) — net-control console reusing the
+[termnetlog](https://github.com/sinetec6969/termnetlog) data layer (Repo/lookups/
+ADIF) over REST + WebSocket; its own SQLite DB, QRZ creds from termnetlog's config.
+**Shack Cam** (`camera.py`, Shack Cam page) — on-demand USB-webcam MJPEG relay via
+`ffmpeg -c copy`, started only while viewed. **APRS TX scaffold** (`aprs_tx.py`,
+Phase B, gated off) with **LAN KISS TNC** (F1) and **AP/hotspot field-mode** prep
+(H1, `deploy/`). **Robustness:** SDR startup is non-fatal — an unplugged RTL-SDR no
+longer takes the whole dashboard down; it runs degraded.
 
 ### Unreleased — surveillance detection
 **Ring and Flock Safety detection** (`surveil.py`, Surveillance page, dashboard
