@@ -98,7 +98,20 @@ Parked until an HF rig (or direct-sampling experiments) happen:
 
 - [ ] FT8 **RX-only** via RTL-SDR V4 direct sampling (14.074 MHz) — decode-and-map page, no TX needed
 - [ ] FT8/JS8Call TX, ARDOP, Winlink-HF — needs the rig
+- [ ] Broader HF data modes — PSK31, RTTY, Olivia, MFSK, JS8 keyboard-to-keyboard (DigiPi ships these via FLDigi/JS8Call; we take the modes as native decoders reusing the FT8 RX path, not the desktop apps behind VNC)
+- [ ] **Hamlib `rigctld` rig control** — CAT over USB for IC-7300 / IC-705 / Xiegu / FT-991. `radio.py` grows a `RigInterface` beside the Digirig PTT path; unlocks HF TX and remote tune. Hardware-gated on owning a CAT rig
+- [ ] ARDOP / MERCURY as extra Winlink-HF transports (beyond Pat-over-AX.25 in Phase D)
 - [ ] HF SSTV RX at 14.230 MHz (Roadmap I leftover — direct sampling mode not yet wired)
+
+## Phase H — Field & appliance (from the DigiPi scout, 2026-09-25)
+
+DigiPi (KM6LYW) is the comms distro this roadmap was already modelled on; a re-read
+turned up field-ops ideas we hadn't captured. Take the capabilities as native
+services, not DigiPi's bundle of desktop apps behind VNC (same rule as INTERCEPT.md).
+
+- [ ] **AP / hotspot field mode** — Pi brings up its own WiFi AP (hostapd + dnsmasq, config-flag or a GPIO/boot toggle) so the whole console runs off-grid with just a phone; falls back to joining home WiFi when present. Highest-value new item, no new hardware. The one thing that makes "field-deployable console" literally true
+- [ ] **Read-only root filesystem** — promoted from the backlog; DigiPi's overlayroot approach. SD-wear protection for a box left running in the field. Pairs with log rotation and moving runtime JSON (call history, tags, sightings) to a small writable overlay
+- [ ] *(stretch)* **GPIO status LEDs** — physical carrier-detect / TX-active / mode-lock lights for a headless field box
 
 ---
 
@@ -112,7 +125,7 @@ Parked until an HF rig (or direct-sampling experiments) happen:
 - [ ] **SSTV slant correction** — sample-rate drift estimate across 240 lines
 - [ ] **Airband ATIS text decode**
 - [ ] **Meshtastic polish** — TRACEROUTE display, telemetry sparklines
-- [ ] **Ops hardening** — read-only root filesystem option (SD wear — DigiPi's best idea), log rotation for packet/call logs
+- [ ] **Ops hardening** — read-only root filesystem (moved to Phase H), log rotation for packet/call logs
 
 ---
 
@@ -122,11 +135,12 @@ Parked until an HF rig (or direct-sampling experiments) happen:
 2. **Phase A** — Digirig bring-up + safety rails (one focused session)
 3. **Phase B1–B2** — beacon + APRS messaging (first actual TX, high payoff)
 4. **Phase F1** — LAN KISS TNC (config flag + docs, nearly free)
-5. **Phase C** — connected-mode terminal (the packet BBS itch)
-6. **Satellite pass prediction** — pure software, no new hardware, long-promised
-7. **Phase E** — SSTV TX (fun demo, reuses everything)
-8. **Phase D** — Winlink
-9. Trunked DMR / ADS-B extras / HF — as the mood strikes
+5. **Phase H1** — AP/hotspot field mode (no new hardware, makes the box truly field-deployable)
+6. **Phase C** — connected-mode terminal (the packet BBS itch)
+7. **Satellite pass prediction** — pure software, no new hardware, long-promised
+8. **Phase E** — SSTV TX (fun demo, reuses everything)
+9. **Phase D** — Winlink
+10. Trunked DMR / ADS-B extras / Phase G HF — as the mood strikes
 
 ---
 
