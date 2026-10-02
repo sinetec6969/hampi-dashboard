@@ -76,6 +76,13 @@ surveil:                  # Ring / Flock Safety detection (BLE adverts + WiFi AP
   wifi_scan_s: 30         # nmcli AP scan interval; rescans need a polkit grant (see README)
   # log_file: ../surveillance_log.jsonl   # first sighting of each device, appended
 
+camera:                   # shack webcam — on-demand MJPEG relay (no re-encode)
+  enable: true
+  device: /dev/video0     # USB webcam capture node (or a /dev/v4l/by-id/... path)
+  width: 1280
+  height: 720
+  fps: 15
+
 qth:
   grid: EM95of            # Maidenhead locator — drives satellite pass prediction
 
@@ -87,6 +94,9 @@ qth:
 aprs:
   freq: 144390000         # North America APRS
   gain: 49.6
+  kiss_lan: false         # [F1] expose direwolf KISS TNC (:8001) to the LAN for
+                          # APRSdroid / YAAC / RadioMail. Off = intended loopback-only
+                          # (run deploy/harden-kiss.sh to actually firewall it off)
 
 meshtastic:
   enable: true

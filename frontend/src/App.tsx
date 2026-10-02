@@ -3,7 +3,7 @@ import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, RadioTower, AudioWaveform, Mic, Network, Radar, MessageSquareText,
   MapPin, SquareTerminal, Waypoints, Plane, Image, CloudSun, Satellite, Antenna,
-  Bluetooth, Siren, Clock, Menu, X, Activity, Cctv,
+  Bluetooth, Siren, Clock, Menu, X, Activity, Cctv, Camera,
 } from 'lucide-react'
 import './App.css'
 import { useMode, type SdrMode } from './mode'
@@ -28,6 +28,7 @@ import SatellitePage from './pages/SatellitePage'
 import HamClockPage from './pages/HamClockPage'
 import AllScanPage from './pages/AllScanPage'
 import SurveillancePage from './pages/SurveillancePage'
+import CameraPage from './pages/CameraPage'
 
 interface NavDef { to: string; label: string; icon: ComponentType; sdr?: SdrMode }
 const NAV: { group: string; items: NavDef[] }[] = [
@@ -61,6 +62,7 @@ const NAV: { group: string; items: NavDef[] }[] = [
   ] },
   { group: 'Tools', items: [
     { to: '/hamclock', label: 'HamClock', icon: Clock },
+    { to: '/camera',   label: 'Shack Cam', icon: Camera },
   ] },
 ]
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -148,6 +150,7 @@ export default function App() {
             <Route path="/hamclock"   element={<HamClockPage />} />
             <Route path="/allscan"    element={<AllScanPage />} />
             <Route path="/surveillance" element={<SurveillancePage />} />
+            <Route path="/camera"       element={<CameraPage />} />
           </Routes>
         </div>
       </main>

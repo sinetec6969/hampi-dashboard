@@ -4,6 +4,7 @@ import { MapContainer, Marker, Popup, useMap } from 'react-leaflet'
 import OfflineTiles from '../components/OfflineTiles'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import AprsTxPanel from '../components/AprsTxPanel'
 
 // Layout reuses the adsb-* CSS classes — identical map + side-panel shell.
 
@@ -130,7 +131,7 @@ export default function APRSPage() {
           const msg = JSON.parse(e.data)
           if (msg.type === 'packet') applyPacket(msg.packet)
           else if (msg.type === 'status') setFrames(msg.frames)
-        } catch {}
+        } catch { /* ignore */ }
       }
     }
     connect()
@@ -153,6 +154,8 @@ export default function APRSPage() {
           {connected ? '● Live' : '○ Offline'}
         </span>
       </div>
+
+      <AprsTxPanel />
 
       <div className="adsb-body">
         <div className="adsb-map-wrap">

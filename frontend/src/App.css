@@ -782,3 +782,29 @@
 .surv-evidence { font-size: var(--fs-sm); max-width: 360px; }
 .surv-note { font-size: var(--fs-sm); color: var(--text-3); line-height: 1.6; max-width: 900px; }
 @media (max-width: 900px) { .surv-summary { grid-template-columns: 1fr; } }
+
+/* ── APRS TX / TNC strip ──────────────────────────────────────────────────── */
+.aprs-tx { border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+.aprs-tx-bar { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 14px;
+  background: none; border: none; color: var(--text); cursor: pointer; text-align: left; }
+.aprs-tx-bar:hover { background: var(--raised); }
+.aprs-tx-bar svg { color: var(--text-3); }
+.aprs-tx-title { font-weight: 600; font-size: var(--fs-md); }
+.aprs-tnc-chip { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-sm); color: var(--text-2); }
+.aprs-tx-body { display: flex; flex-direction: column; gap: 10px; padding: 4px 14px 14px; }
+.aprs-tx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.aprs-tx-msg { font-size: var(--fs-sm); color: var(--text-2); }
+.aprs-tnc-info { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-sm);
+  color: var(--text-3); border-top: 1px solid var(--border); padding-top: 8px; }
+.aprs-tnc-info svg { color: var(--text-3); flex-shrink: 0; margin-top: 1px; }
+
+/* ── Shack camera ─────────────────────────────────────────────────────────── */
+.cam-panel { flex: 1; min-height: 0; }
+.cam-panel .ui-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.cam-stage { flex: 1; min-height: 320px; display: flex; align-items: center; justify-content: center;
+  background: #000; border-radius: var(--radius); overflow: hidden; }
+.cam-img { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; }
+.cam-placeholder { width: 100%; display: flex; align-items: center; justify-content: center; }
+.cam-controls { display: flex; align-items: center; gap: 10px; padding-top: 12px; flex-wrap: wrap; }
+.cam-stats { margin-left: auto; display: flex; gap: 18px; }

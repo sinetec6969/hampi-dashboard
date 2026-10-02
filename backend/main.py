@@ -38,6 +38,8 @@ from scanner import Scanner, DEFAULT_CHANNELS, parse_ini, dump_ini
 from aprs import APRSDecoder
 from ax25 import AX25Decoder
 from radio import RadioInterface
+from aprs_tx import APRSTx
+from camera import Camera
 from satpredict import SatTracker
 from meteor import MeteorDecoder
 from subghz import SubGHzDecoder
@@ -148,6 +150,14 @@ SSTV_IMAGE_DIR: str   = os.getenv("SSTV_IMAGE_DIR", cfg("sstv.image_dir",
 # APRS configuration
 APRS_FREQ: int   = int(os.getenv("APRS_FREQ",   cfg("aprs.freq", 144390000)))
 APRS_GAIN: float = float(os.getenv("APRS_GAIN", cfg("aprs.gain", 49.6)))
+APRS_KISS_LAN: bool = cfg_bool("APRS_KISS_LAN", "aprs.kiss_lan", 0)   # [F1] LAN TNC exposure (intent flag)
+
+# Shack camera (USB webcam, native MJPEG, on-demand)
+CAM_ENABLE: bool = cfg_bool("CAM_ENABLE", "camera.enable", 1)
+CAM_DEVICE: str  = os.getenv("CAM_DEVICE", cfg("camera.device", "/dev/video0"))
+CAM_WIDTH:  int  = int(os.getenv("CAM_WIDTH",  cfg("camera.width", 1280)))
+CAM_HEIGHT: int  = int(os.getenv("CAM_HEIGHT", cfg("camera.height", 720)))
+CAM_FPS:    int  = int(os.getenv("CAM_FPS",    cfg("camera.fps", 15)))
 
 # QTH + SSTV satellite tracking (Maidenhead grid; sat list optional override)
 QTH_GRID:  str = os.getenv("QTH_GRID", cfg("qth.grid", "EM95of"))
@@ -281,6 +291,8 @@ satellite_monitor: Optional[SatelliteMonitor] = None
 ble_scanner: Optional[BLEScanner] = None
 surveil: Optional[SurveillanceDetector] = None
 radio: Optional[RadioInterface] = None
+aprs_tx: Optional[APRSTx] = None   # [Phase B] gated APRS beacon/messaging
+camera: Optional[Camera] = None   # shack webcam, on-demand MJPEG
 sat_tracker: Optional[SatTracker] = None
 
 # Last-known scanner status — returned by /api/scanner/status
@@ -699,7 +711,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, scanner, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker, ble_scanner, surveil
+    global sdr, decoder, scanner, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker, ble_scanner, surveil, aprs_tx, camera
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -720,13 +732,21 @@ async def lifespan(app: FastAPI):
         audio_callback=on_dmr_audio,
     )
 
-    # Start hardware (blocking calls wrapped)
+    # Start hardware (blocking calls wrapped). A missing/unplugged RTL-SDR must
+    # NOT take the whole dashboard down — everything else (Meshtastic, BLE,
+    # camera, maps, HamClock) works without it, and the operator is often remote.
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, sdr.start)
-    await decoder.start()
-
-    # Launch SDR acquisition loop
-    sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
+    try:
+        await loop.run_in_executor(None, sdr.start)
+        await decoder.start()
+        sdr_task = asyncio.create_task(sdr_loop(), name="sdr-loop")
+    except Exception:
+        logger.warning("SDR/DMR bring-up failed (dongle unplugged?) — dashboard "
+                       "runs degraded; switch SDR mode once the dongle is back", exc_info=True)
+        try:
+            await loop.run_in_executor(None, sdr.stop)
+        except Exception:
+            pass
 
     # Start scanner (optional — graceful on failure)
     if SCAN_ENABLE:
@@ -828,6 +848,12 @@ async def lifespan(app: FastAPI):
         logger.info("Radio TX disabled (tx_enable=%s, callsign=%s) — Digirig not opened",
                     TX_ENABLE, STATION.get("callsign", "") or "—")
 
+    # APRS TX [Phase B] — always constructed; every call is hard-gated on tx_enable
+    aprs_tx = APRSTx(STATION, RADIO_SERIAL, RADIO_AUDIO, TX_ENABLE)
+
+    if CAM_ENABLE:
+        camera = Camera(CAM_DEVICE, CAM_WIDTH, CAM_HEIGHT, CAM_FPS)   # ffmpeg starts on first viewer
+
     # SSTV satellite tracker — load AMSAT TLEs (network, graceful on failure)
     try:
         sat_tracker = SatTracker(QTH_GRID, SSTV_SATS)
@@ -878,6 +904,8 @@ async def lifespan(app: FastAPI):
         await surveil.stop()
     if radio is not None:
         radio.stop()
+    if camera is not None:
+        await camera.stop()
     logger.info("Shutdown complete")
 
 
@@ -2326,6 +2354,98 @@ async def api_radio_tone(freq: int = 1000, seconds: float = 2.0):
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     return {"status": "ok", "freq": freq, "seconds": seconds}
+
+
+# ---------------------------------------------------------------------------
+# APRS TX [Phase B] + LAN KISS TNC [F1]. TX hard-gated on tx_enable + callsign.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/aprs/tx/status")
+async def api_aprs_tx_status():
+    if aprs_tx is None:
+        return {"ready": False, "tx_enable": TX_ENABLE, "callsign": STATION.get("callsign", ""),
+                "ptt_present": os.path.exists(RADIO_SERIAL), "station": STATION}
+    return {**aprs_tx.status(), "station": STATION}
+
+
+@app.post("/api/aprs/tx/beacon")
+async def api_aprs_tx_beacon():
+    if aprs_tx is None:
+        raise HTTPException(status_code=503, detail="APRS TX not available")
+    try:
+        return await aprs_tx.beacon()
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+class APRSMessageBody(BaseModel):
+    addressee: str
+    text: str
+
+
+@app.post("/api/aprs/tx/message")
+async def api_aprs_tx_message(body: APRSMessageBody):
+    if aprs_tx is None:
+        raise HTTPException(status_code=503, detail="APRS TX not available")
+    try:
+        return await aprs_tx.send_message(body.addressee, body.text)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/api/camera/status")
+async def api_camera_status():
+    if camera is None:
+        return {"present": False, "streaming": False, "viewers": 0, "enabled": False,
+                "error": "disabled in config", "device": CAM_DEVICE}
+    return {**camera.status(), "enabled": True}
+
+
+@app.get("/api/camera/snapshot")
+async def api_camera_snapshot():
+    from fastapi.responses import Response
+    if camera is None:
+        raise HTTPException(status_code=503, detail="camera disabled")
+    try:
+        jpg = await camera.snapshot()
+    except (RuntimeError, asyncio.TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return Response(content=jpg, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/camera/stream")
+async def api_camera_stream():
+    from fastapi.responses import StreamingResponse
+    if camera is None:
+        raise HTTPException(status_code=503, detail="camera disabled")
+    boundary = "hampiframe"
+
+    async def gen():
+        try:
+            async for frame in camera.frames():
+                yield (b"--" + boundary.encode() + b"\r\n"
+                       b"Content-Type: image/jpeg\r\n"
+                       b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n"
+                       + frame + b"\r\n")
+        except (RuntimeError, asyncio.CancelledError):
+            return
+
+    return StreamingResponse(gen(),
+        media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+        headers={"Cache-Control": "no-store", "Connection": "close"})
+
+
+@app.get("/api/aprs/tnc")
+async def api_aprs_tnc():
+    """[F1] Where a phone/laptop points its KISS TNC. direwolf opens :8001 in APRS mode."""
+    return {"port": 8001, "lan_enabled": APRS_KISS_LAN,
+            "active": active_sdr_mode == "aprs",
+            "hint": "point APRSdroid / YAAC / RadioMail at <pi-ip>:8001 (TCP KISS) while SDR 0 is in APRS mode"}
 
 
 # ---------------------------------------------------------------------------
