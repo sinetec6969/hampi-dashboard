@@ -13,3 +13,6 @@ skyfield
 pyserial
 bleak
 bluetooth-numbers
+
+# net logger (editable local clone: pip install -e ~/src/termnetlog)
+# termnetlog @ git+https://github.com/sinetec6969/termnetlog

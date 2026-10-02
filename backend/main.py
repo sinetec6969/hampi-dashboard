@@ -40,6 +40,8 @@ from ax25 import AX25Decoder
 from radio import RadioInterface
 from aprs_tx import APRSTx
 from camera import Camera
+from netlog import NetLog
+from termnetlog.repo import DuplicateCheckIn
 from satpredict import SatTracker
 from meteor import MeteorDecoder
 from subghz import SubGHzDecoder
@@ -159,6 +161,11 @@ CAM_WIDTH:  int  = int(os.getenv("CAM_WIDTH",  cfg("camera.width", 1280)))
 CAM_HEIGHT: int  = int(os.getenv("CAM_HEIGHT", cfg("camera.height", 720)))
 CAM_FPS:    int  = int(os.getenv("CAM_FPS",    cfg("camera.fps", 15)))
 
+# Net-control logger (termnetlog data layer; its own DB, separate from the TUI)
+NETLOG_ENABLE: bool = cfg_bool("NETLOG_ENABLE", "netlog.enable", 1)
+NETLOG_DB: str = os.getenv("NETLOG_DB", cfg("netlog.db_path",
+    os.path.join(os.path.dirname(__file__), "..", "netlog.db")))
+
 # QTH + SSTV satellite tracking (Maidenhead grid; sat list optional override)
 QTH_GRID:  str = os.getenv("QTH_GRID", cfg("qth.grid", "EM95of"))
 SSTV_SATS: Optional[list] = cfg("sstv_satellites", None)
@@ -270,6 +277,7 @@ sstv_clients:       Set[WebSocket] = set()
 satellite_clients:  Set[WebSocket] = set()
 ble_clients:        Set[WebSocket] = set()
 surveil_clients:    Set[WebSocket] = set()
+netlog_clients:     Set[WebSocket] = set()
 aprs_clients:       Set[WebSocket] = set()
 ax25_clients:       Set[WebSocket] = set()
 meteor_clients:     Set[WebSocket] = set()
@@ -293,6 +301,7 @@ surveil: Optional[SurveillanceDetector] = None
 radio: Optional[RadioInterface] = None
 aprs_tx: Optional[APRSTx] = None   # [Phase B] gated APRS beacon/messaging
 camera: Optional[Camera] = None   # shack webcam, on-demand MJPEG
+netlog: Optional[NetLog] = None   # net-control logger (termnetlog)
 sat_tracker: Optional[SatTracker] = None
 
 # Last-known scanner status — returned by /api/scanner/status
@@ -457,6 +466,10 @@ async def on_ble_update(msg: dict) -> None:
 
 async def on_surveil_update(msg: dict) -> None:
     await broadcast_json(surveil_clients, msg)
+
+
+async def on_netlog_update(msg: dict) -> None:
+    await broadcast_json(netlog_clients, msg)
 
 
 async def on_meteor_status(msg: dict) -> None:
@@ -711,7 +724,7 @@ async def sdr_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sdr, decoder, scanner, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker, ble_scanner, surveil, aprs_tx, camera
+    global sdr, decoder, scanner, meshtastic, adsb_decoder, sdr_task, satellite_monitor, radio, sat_tracker, ble_scanner, surveil, aprs_tx, camera, netlog
 
     # Load persisted call history
     call_history.extend(_load_history())
@@ -854,6 +867,13 @@ async def lifespan(app: FastAPI):
     if CAM_ENABLE:
         camera = Camera(CAM_DEVICE, CAM_WIDTH, CAM_HEIGHT, CAM_FPS)   # ffmpeg starts on first viewer
 
+    if NETLOG_ENABLE:
+        try:
+            netlog = NetLog(NETLOG_DB, update_callback=on_netlog_update)
+        except Exception:
+            logger.warning("NetLog failed to start (termnetlog missing?) — net logging disabled", exc_info=True)
+            netlog = None
+
     # SSTV satellite tracker — load AMSAT TLEs (network, graceful on failure)
     try:
         sat_tracker = SatTracker(QTH_GRID, SSTV_SATS)
@@ -906,6 +926,8 @@ async def lifespan(app: FastAPI):
         radio.stop()
     if camera is not None:
         await camera.stop()
+    if netlog is not None:
+        await netlog.stop()
     logger.info("Shutdown complete")
 
 
@@ -2395,6 +2417,124 @@ async def api_aprs_tx_message(body: APRSMessageBody):
         raise HTTPException(status_code=403, detail=str(exc))
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+
+class NetCreateBody(BaseModel):
+    name: str
+    frequency: str = ""
+    mode: str = ""
+    band: str = ""
+    ncs_callsign: str = ""
+    my_role: str = "NCS"
+    notes: str = ""
+
+
+class CheckinBody(BaseModel):
+    text: str
+    relayed_by: str = ""
+
+
+class FlagBody(BaseModel):
+    flag: str
+
+
+def _netlog_or_503() -> NetLog:
+    if netlog is None:
+        raise HTTPException(status_code=503, detail="net logging disabled")
+    return netlog
+
+
+@app.websocket("/ws/netlog")
+async def ws_netlog(websocket: WebSocket):
+    await websocket.accept()
+    netlog_clients.add(websocket)
+    try:
+        if netlog is not None:
+            await websocket.send_text(json.dumps({"type": "status", "status": netlog.status_dict()}))
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Unexpected error in netlog WebSocket handler")
+    finally:
+        netlog_clients.discard(websocket)
+
+
+@app.get("/api/netlog/status")
+async def api_netlog_status():
+    if netlog is None:
+        return {"enabled": False, "nets": 0, "operators": 0, "open_nets": [], "lookups": False}
+    return {"enabled": True, **netlog.status_dict()}
+
+
+@app.get("/api/netlog/nets")
+async def api_netlog_nets(search: str = ""):
+    return _netlog_or_503().list_nets(search=search)
+
+
+@app.post("/api/netlog/nets")
+async def api_netlog_create_net(body: NetCreateBody):
+    nl = _netlog_or_503()
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="net name required")
+    return nl.create_net(**body.model_dump())
+
+
+@app.post("/api/netlog/nets/{net_id}/end")
+async def api_netlog_end_net(net_id: int):
+    try:
+        return _netlog_or_503().end_net(net_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/netlog/nets/{net_id}/checkins")
+async def api_netlog_checkins(net_id: int):
+    return _netlog_or_503().checkins(net_id)
+
+
+@app.post("/api/netlog/nets/{net_id}/checkin")
+async def api_netlog_add_checkin(net_id: int, body: CheckinBody):
+    nl = _netlog_or_503()
+    try:
+        return await nl.add_checkin(net_id, body.text, body.relayed_by)
+    except DuplicateCheckIn as exc:
+        raise HTTPException(status_code=409, detail=str(exc) or "already checked in")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/netlog/checkins/{checkin_id}/flag")
+async def api_netlog_flag(checkin_id: int, body: FlagBody):
+    try:
+        return _netlog_or_503().toggle_flag(checkin_id, body.flag)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/netlog/operators")
+async def api_netlog_operators(q: str = ""):
+    return _netlog_or_503().search_operators(q)
+
+
+@app.get("/api/netlog/operators/{call}")
+async def api_netlog_operator(call: str):
+    op = _netlog_or_503().operator(call)
+    if op is None:
+        raise HTTPException(status_code=404, detail="no such operator")
+    return op
+
+
+@app.get("/api/netlog/nets/{net_id}/adif")
+async def api_netlog_adif(net_id: int):
+    from fastapi.responses import Response
+    try:
+        text, fname = _netlog_or_503().adif(net_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return Response(content=text, media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 @app.get("/api/camera/status")

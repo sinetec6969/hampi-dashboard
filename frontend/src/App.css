@@ -808,3 +808,22 @@
 .cam-placeholder { width: 100%; display: flex; align-items: center; justify-content: center; }
 .cam-controls { display: flex; align-items: center; gap: 10px; padding-top: 12px; flex-wrap: wrap; }
 .cam-stats { margin-left: auto; display: flex; gap: 18px; }
+
+/* ── Net log ──────────────────────────────────────────────────────────────── */
+.netlog-select { min-width: 220px; }
+.netlog-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 10px; }
+.netlog-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 12px; }
+.netlog-body:has(.netlog-op) { grid-template-columns: minmax(0,1fr) 300px; }
+.netlog-main { min-height: 0; }
+.netlog-main .ui-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0; }
+.netlog-entry { display: flex; gap: 8px; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); }
+.netlog-entry input { flex: 1; font-family: var(--font-mono); text-transform: uppercase; }
+.netlog-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.netlog-flags { display: inline-flex; gap: 4px; }
+.netlog-flag { min-width: 26px; height: 22px; padding: 0 5px; border-radius: var(--radius);
+  border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-3);
+  font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
+.netlog-flag.on { background: var(--green-bg); border-color: rgba(53,208,127,.5); color: var(--green-hi); }
+.netlog-op-hist { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+.netlog-hist-row { display: flex; gap: 10px; font-size: var(--fs-sm); padding: 3px 0; border-bottom: 1px solid var(--border); }
+@media (max-width: 900px) { .netlog-body { grid-template-columns: 1fr; } }

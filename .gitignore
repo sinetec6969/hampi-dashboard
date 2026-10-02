@@ -28,3 +28,8 @@ surveillance_log.jsonl
 
 # Offline map tiles (PMTiles extracts — see STATE.md)
 tiles/
+
+# Net log (termnetlog data layer) — dashboard's own DB
+netlog.db
+netlog.db-wal
+netlog.db-shm

@@ -83,6 +83,11 @@ camera:                   # shack webcam — on-demand MJPEG relay (no re-encode
   height: 720
   fps: 15
 
+netlog:                   # net-control logger (reuses the termnetlog data layer)
+  enable: true
+  db_path: ../netlog.db   # dashboard's OWN log — separate from the termnetlog TUI's DB
+  # QRZ creds + offline flag come from termnetlog's ~/.config/termnetlog/config.toml
+
 qth:
   grid: EM95of            # Maidenhead locator — drives satellite pass prediction
 
